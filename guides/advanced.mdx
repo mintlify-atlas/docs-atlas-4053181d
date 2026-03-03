@@ -1,0 +1,588 @@
+---
+title: "고급 사용법"
+description: "Document 모델과 레지스트리를 직접 다뤄서 고급 기능을 구현하는 방법을 배워요"
+---
+
+## 개요
+
+`ureca_document_parser`의 내부 구조를 이해하고 직접 다뤄서 더 유연한 문서 처리를 구현할 수 있어요. 이 가이드에서는 Document 모델, 레지스트리, 커스텀 파서와 Writer를 다루는 방법을 알아볼게요.
+
+## Document 모델
+
+모든 파서는 문서를 중간 표현인 `Document` 모델로 변환해요. 이 모델을 직접 다루면 더 세밀한 제어가 가능해요.
+
+### Document 구조
+
+`Document`는 다음과 같은 구조를 가져요:
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class Document:
+    elements: list[DocumentElement] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=Metadata)
+```
+
+### DocumentElement 타입
+
+`DocumentElement`는 다음 타입 중 하나예요:
+
+<Tabs>
+  <Tab title="Paragraph">
+    ```python
+    @dataclass
+    class Paragraph:
+        text: str
+        heading_level: int = 0  # 0 = 일반 문단, 1-6 = 헤딩
+    ```
+    
+    일반 문단이나 헤딩을 표현해요.
+    
+    **예시:**
+    ```python
+    from ureca_document_parser.models import Paragraph
+    
+    # 일반 문단
+    para = Paragraph(text="이것은 일반 문단입니다.")
+    
+    # H1 헤딩
+    h1 = Paragraph(text="제목", heading_level=1)
+    
+    # H2 헤딩
+    h2 = Paragraph(text="부제목", heading_level=2)
+    ```
+  </Tab>
+  
+  <Tab title="Table">
+    ```python
+    @dataclass
+    class TableCell:
+        content: list[Paragraph | Table] = field(default_factory=list)
+    
+    @dataclass
+    class TableRow:
+        cells: list[TableCell] = field(default_factory=list)
+    
+    @dataclass
+    class Table:
+        rows: list[TableRow] = field(default_factory=list)
+    ```
+    
+    표를 표현해요. 중첩 표도 지원해요.
+    
+    **예시:**
+    ```python
+    from ureca_document_parser.models import Table, TableRow, TableCell, Paragraph
+    
+    # 2x2 표 생성
+    table = Table(rows=[
+        TableRow(cells=[
+            TableCell(content=[Paragraph(text="헤더1")]),
+            TableCell(content=[Paragraph(text="헤더2")])
+        ]),
+        TableRow(cells=[
+            TableCell(content=[Paragraph(text="데이터1")]),
+            TableCell(content=[Paragraph(text="데이터2")])
+        ])
+    ])
+    ```
+  </Tab>
+  
+  <Tab title="ListItem">
+    ```python
+    @dataclass
+    class ListItem:
+        text: str = ""
+        level: int = 0
+        ordered: bool = False
+    ```
+    
+    목록 항목을 표현해요.
+    
+    **예시:**
+    ```python
+    from ureca_document_parser.models import ListItem
+    
+    # 순서 없는 목록
+    item1 = ListItem(text="첫 번째 항목", level=0, ordered=False)
+    
+    # 순서 있는 목록
+    item2 = ListItem(text="첫 번째", level=0, ordered=True)
+    
+    # 중첩 목록
+    item3 = ListItem(text="하위 항목", level=1, ordered=False)
+    ```
+  </Tab>
+  
+  <Tab title="Image">
+    ```python
+    @dataclass
+    class Image:
+        alt_text: str = ""
+        source: str = ""
+        data: bytes = b""
+        ocr_text: str = ""
+    ```
+    
+    이미지를 표현해요.
+    
+    **예시:**
+    ```python
+    from ureca_document_parser.models import Image
+    
+    img = Image(
+        alt_text="다이어그램",
+        source="diagram.png",
+        data=b"...",  # 이미지 바이너리 데이터
+        ocr_text="OCR로 추출한 텍스트"
+    )
+    ```
+  </Tab>
+  
+  <Tab title="기타">
+    ```python
+    @dataclass
+    class Link:
+        text: str = ""
+        url: str = ""
+    
+    @dataclass
+    class HorizontalRule:
+        pass
+    ```
+    
+    링크와 수평선을 표현해요.
+    
+    **예시:**
+    ```python
+    from ureca_document_parser.models import Link, HorizontalRule
+    
+    link = Link(text="클릭하세요", url="https://example.com")
+    hr = HorizontalRule()
+    ```
+  </Tab>
+</Tabs>
+
+### Metadata
+
+문서의 메타데이터를 표현해요.
+
+```python
+@dataclass
+class Metadata:
+    title: str = ""
+    author: str = ""
+    source_format: str = ""
+    extra: dict[str, str] = field(default_factory=dict)
+```
+
+## 레지스트리 직접 사용
+
+`convert()` 함수 대신 레지스트리를 직접 사용해서 더 세밀하게 제어할 수 있어요.
+
+### 레지스트리 가져오기
+
+```python
+from ureca_document_parser import get_registry
+
+registry = get_registry()
+```
+
+<Info>
+`get_registry()`는 스레드 안전한 싱글톤을 반환해요. 여러 번 호출해도 같은 인스턴스가 반환돼요.
+</Info>
+
+### 파서 직접 사용
+
+파일을 `Document` 모델로 파싱해요.
+
+```python
+from pathlib import Path
+from ureca_document_parser import get_registry
+
+registry = get_registry()
+
+# 파싱만 수행 (Writer 실행 안 함)
+doc = registry.parse("보고서.hwp")
+
+print(f"요소 개수: {len(doc.elements)}")
+print(f"포맷: {doc.metadata.source_format}")
+
+# Document 구조 탐색
+for element in doc.elements:
+    if isinstance(element, Paragraph):
+        print(f"문단: {element.text[:50]}")
+    elif isinstance(element, Table):
+        print(f"표: {len(element.rows)}개 행")
+```
+
+### Writer 직접 사용
+
+`Document`를 특정 포맷으로 변환해요.
+
+```python
+from ureca_document_parser import get_registry
+
+registry = get_registry()
+
+# 파싱
+doc = registry.parse("보고서.hwp")
+
+# Markdown으로 변환
+markdown = registry.write(doc, "markdown")
+
+print(markdown)
+```
+
+### 지원 포맷 확인
+
+레지스트리에 등록된 파서와 Writer를 확인할 수 있어요.
+
+```python
+from ureca_document_parser import get_registry
+
+registry = get_registry()
+
+print("지원 입력 형식:", registry.supported_extensions)
+# ['.hwp', '.hwpx']
+
+print("지원 출력 형식:", registry.supported_formats)
+# ['markdown']
+```
+
+## Document 직접 조작
+
+### 요소 필터링
+
+특정 타입의 요소만 추출할 수 있어요.
+
+```python
+from ureca_document_parser import get_registry
+from ureca_document_parser.models import Paragraph, Table
+
+registry = get_registry()
+doc = registry.parse("보고서.hwp")
+
+# 모든 헤딩 추출
+headings = [
+    elem for elem in doc.elements
+    if isinstance(elem, Paragraph) and elem.heading_level > 0
+]
+
+print("목차:")
+for heading in headings:
+    indent = "  " * (heading.heading_level - 1)
+    print(f"{indent}- {heading.text}")
+
+# 모든 표 추출
+tables = [elem for elem in doc.elements if isinstance(elem, Table)]
+print(f"\n표 개수: {len(tables)}")
+```
+
+### 요소 수정
+
+`Document`의 요소를 수정해서 커스텀 처리를 할 수 있어요.
+
+```python
+from ureca_document_parser import get_registry
+from ureca_document_parser.models import Paragraph
+
+registry = get_registry()
+doc = registry.parse("보고서.hwp")
+
+# 모든 문단 텍스트를 대문자로 변경
+for element in doc.elements:
+    if isinstance(element, Paragraph):
+        element.text = element.text.upper()
+
+# 수정된 Document를 Markdown으로 변환
+markdown = registry.write(doc, "markdown")
+print(markdown)
+```
+
+### 요소 추가/제거
+
+```python
+from ureca_document_parser import get_registry
+from ureca_document_parser.models import Paragraph, HorizontalRule
+
+registry = get_registry()
+doc = registry.parse("보고서.hwp")
+
+# 문서 시작에 새 헤딩 추가
+doc.elements.insert(0, Paragraph(text="추가된 제목", heading_level=1))
+
+# 각 헤딩 뒤에 수평선 추가
+new_elements = []
+for element in doc.elements:
+    new_elements.append(element)
+    if isinstance(element, Paragraph) and element.heading_level > 0:
+        new_elements.append(HorizontalRule())
+
+doc.elements = new_elements
+
+# 변환
+markdown = registry.write(doc, "markdown")
+print(markdown)
+```
+
+## 커스텀 파서/Writer 작성
+
+<Warning>
+이 기능은 고급 사용자를 위한 것이에요. 대부분의 경우 기본 제공되는 파서와 Writer로 충분해요.
+</Warning>
+
+### Parser Protocol
+
+커스텀 파서는 다음 Protocol을 구현해야 해요:
+
+```python
+from pathlib import Path
+from typing import Protocol
+from ureca_document_parser.models import Document
+
+class Parser(Protocol):
+    @staticmethod
+    def extensions() -> list[str]:
+        """지원하는 파일 확장자 목록"""
+        ...
+    
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        """파일을 파싱해서 Document 반환"""
+        ...
+```
+
+**예시: 간단한 텍스트 파서**
+
+```python
+from pathlib import Path
+from ureca_document_parser.models import Document, Paragraph, Metadata
+
+class TxtParser:
+    @staticmethod
+    def extensions() -> list[str]:
+        return [".txt"]
+    
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        path = Path(filepath)
+        text = path.read_text(encoding="utf-8")
+        
+        # 각 줄을 하나의 문단으로 변환
+        elements = [
+            Paragraph(text=line)
+            for line in text.split("\n")
+            if line.strip()
+        ]
+        
+        metadata = Metadata(
+            title=path.stem,
+            source_format="txt"
+        )
+        
+        return Document(elements=elements, metadata=metadata)
+```
+
+### Writer Protocol
+
+커스텀 Writer는 다음 Protocol을 구현해야 해요:
+
+```python
+from typing import Protocol
+from ureca_document_parser.models import Document
+
+class Writer(Protocol):
+    @staticmethod
+    def format_name() -> str:
+        """출력 포맷 이름"""
+        ...
+    
+    @staticmethod
+    def file_extension() -> str:
+        """출력 파일 확장자"""
+        ...
+    
+    @staticmethod
+    def write(doc: Document) -> str:
+        """Document를 포맷 문자열로 변환"""
+        ...
+```
+
+**예시: 간단한 HTML Writer**
+
+```python
+from ureca_document_parser.models import Document, Paragraph, Table
+
+class HtmlWriter:
+    @staticmethod
+    def format_name() -> str:
+        return "html"
+    
+    @staticmethod
+    def file_extension() -> str:
+        return ".html"
+    
+    @staticmethod
+    def write(doc: Document) -> str:
+        html_parts = ['<!DOCTYPE html>', '<html>', '<body>']
+        
+        for element in doc.elements:
+            if isinstance(element, Paragraph):
+                if element.heading_level > 0:
+                    html_parts.append(
+                        f"<h{element.heading_level}>{element.text}</h{element.heading_level}>"
+                    )
+                else:
+                    html_parts.append(f"<p>{element.text}</p>")
+            elif isinstance(element, Table):
+                html_parts.append("<table>")
+                for row in element.rows:
+                    html_parts.append("<tr>")
+                    for cell in row.cells:
+                        content = " ".join(
+                            p.text for p in cell.content if isinstance(p, Paragraph)
+                        )
+                        html_parts.append(f"<td>{content}</td>")
+                    html_parts.append("</tr>")
+                html_parts.append("</table>")
+        
+        html_parts.extend(['</body>', '</html>'])
+        return "\n".join(html_parts)
+```
+
+### 레지스트리에 등록
+
+커스텀 파서/Writer를 레지스트리에 등록해서 사용할 수 있어요.
+
+```python
+from ureca_document_parser import get_registry
+
+# 레지스트리 가져오기
+registry = get_registry()
+
+# 파서 등록
+registry.register_parser(TxtParser)
+
+# Writer 등록
+registry.register_writer(HtmlWriter)
+
+# 사용
+doc = registry.parse("문서.txt")  # TxtParser 사용
+html = registry.write(doc, "html")  # HtmlWriter 사용
+print(html)
+```
+
+<Note>
+레지스트리는 싱글톤이므로, 한 번 등록하면 프로그램 전체에서 사용할 수 있어요.
+</Note>
+
+## 실전 예제
+
+### 헤딩만 추출해서 목차 생성
+
+```python
+from ureca_document_parser import get_registry
+from ureca_document_parser.models import Paragraph
+
+registry = get_registry()
+doc = registry.parse("보고서.hwp")
+
+# 헤딩만 추출
+headings = [
+    elem for elem in doc.elements
+    if isinstance(elem, Paragraph) and elem.heading_level > 0
+]
+
+# Markdown 목차 생성
+toc = ["# 목차\n"]
+for heading in headings:
+    indent = "  " * (heading.heading_level - 1)
+    toc.append(f"{indent}- {heading.text}")
+
+print("\n".join(toc))
+```
+
+### 표를 CSV로 추출
+
+```python
+import csv
+from ureca_document_parser import get_registry
+from ureca_document_parser.models import Table, Paragraph
+
+registry = get_registry()
+doc = registry.parse("보고서.hwp")
+
+# 첫 번째 표 찾기
+tables = [elem for elem in doc.elements if isinstance(elem, Table)]
+if not tables:
+    print("표를 찾을 수 없습니다")
+else:
+    table = tables[0]
+    
+    # CSV로 저장
+    with open("table.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for row in table.rows:
+            csv_row = []
+            for cell in row.cells:
+                # 셀 내용을 텍스트로 변환
+                text = " ".join(
+                    p.text for p in cell.content if isinstance(p, Paragraph)
+                )
+                csv_row.append(text)
+            writer.writerow(csv_row)
+    
+    print("table.csv로 저장했습니다")
+```
+
+### 문단별로 LangChain Document 생성
+
+```python
+from ureca_document_parser import get_registry
+from ureca_document_parser.models import Paragraph
+from langchain_core.documents import Document as LCDocument
+
+registry = get_registry()
+doc = registry.parse("보고서.hwp")
+
+# 각 문단을 별도의 Document로 변환
+chunks = []
+for i, element in enumerate(doc.elements):
+    if isinstance(element, Paragraph) and element.text.strip():
+        lc_doc = LCDocument(
+            page_content=element.text,
+            metadata={
+                "source": "보고서.hwp",
+                "paragraph_index": i,
+                "is_heading": element.heading_level > 0,
+                "heading_level": element.heading_level
+            }
+        )
+        chunks.append(lc_doc)
+
+print(f"총 {len(chunks)}개 문단")
+```
+
+## 다음 단계
+
+<CardGroup cols={2}>
+
+<Card title="Python API" icon="python" href="/guides/python-api">
+  기본적인 Python API 사용법을 알아보세요
+</Card>
+
+<Card title="CLI 사용하기" icon="terminal" href="/guides/cli">
+  커맨드라인 인터페이스 사용법을 알아보세요
+</Card>
+
+<Card title="LangChain 연동" icon="link" href="/guides/langchain">
+  RAG 파이프라인 구축 방법을 알아보세요
+</Card>
+
+<Card title="API 레퍼런스" icon="book" href="/api/convert">
+  전체 API 문서를 확인하세요
+</Card>
+
+</CardGroup>

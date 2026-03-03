@@ -1,0 +1,159 @@
+---
+title: 설치
+description: Ureca Document Parser를 프로젝트에 설치하는 방법
+---
+
+## 기본 설치
+
+Ureca Document Parser는 PyPI에 `ureca_document_parser`로 배포되어 있어요. 프로젝트에 맞는 패키지 매니저를 선택해서 설치할 수 있어요.
+
+<CodeGroup>
+
+```bash pip
+pip install ureca_document_parser
+```
+
+```bash uv
+uv add ureca_document_parser
+```
+
+```bash poetry
+poetry add ureca_document_parser
+```
+
+</CodeGroup>
+
+기본 설치로 HWP/HWPX 문서를 Markdown으로 변환하는 모든 기능을 사용할 수 있어요.
+
+## 선택적 의존성
+
+Ureca Document Parser는 사용 목적에 따라 추가 기능을 설치할 수 있어요.
+
+### LangChain 통합
+
+RAG 파이프라인을 위한 문서 청킹 기능을 사용하려면 `langchain` extra를 설치하세요:
+
+<CodeGroup>
+
+```bash pip
+pip install "ureca_document_parser[langchain]"
+```
+
+```bash uv
+uv add "ureca_document_parser[langchain]"
+```
+
+```bash poetry
+poetry add "ureca_document_parser[langchain]"
+```
+
+</CodeGroup>
+
+이 옵션을 설치하면 다음 패키지가 포함돼요:
+- `langchain-text-splitters` (>=0.2)
+- `langchain-core` (>=0.2)
+
+<Note>
+  `chunks=True` 옵션을 사용하려면 반드시 `langchain` extra를 설치해야 해요.
+</Note>
+
+### PDF 지원 (실험적)
+
+PDF 문서 파싱 기능을 사용하려면 `pdf` extra를 설치하세요:
+
+<CodeGroup>
+
+```bash pip
+pip install "ureca_document_parser[pdf]"
+```
+
+```bash uv
+uv add "ureca_document_parser[pdf]"
+```
+
+```bash poetry
+poetry add "ureca_document_parser[pdf]"
+```
+
+</CodeGroup>
+
+### OCR 지원 (실험적)
+
+이미지에서 텍스트를 추출하는 OCR 기능을 사용하려면 `ocr` extra를 설치하세요:
+
+<CodeGroup>
+
+```bash pip
+pip install "ureca_document_parser[ocr]"
+```
+
+```bash uv
+uv add "ureca_document_parser[ocr]"
+```
+
+```bash poetry
+poetry add "ureca_document_parser[ocr]"
+```
+
+</CodeGroup>
+
+<Warning>
+  OCR 기능을 사용하려면 시스템에 Tesseract OCR이 설치되어 있어야 해요. 설치 방법은 [pytesseract 문서](https://github.com/madmaze/pytesseract)를 참고하세요.
+</Warning>
+
+### 모든 기능 설치
+
+모든 선택적 의존성을 한 번에 설치하려면 `all` extra를 사용하세요:
+
+<CodeGroup>
+
+```bash pip
+pip install "ureca_document_parser[all]"
+```
+
+```bash uv
+uv add "ureca_document_parser[all]"
+```
+
+```bash poetry
+poetry add "ureca_document_parser[all]"
+```
+
+</CodeGroup>
+
+## 설치 확인
+
+설치가 완료되면 다음 명령어로 설치를 확인할 수 있어요:
+
+```bash
+ureca_document_parser --list-formats
+```
+
+정상적으로 설치되었다면 지원하는 입력 및 출력 포맷 목록이 출력돼요:
+
+```
+지원 입력 형식: .hwp, .hwpx
+지원 출력 형식: markdown
+```
+
+## 시스템 요구사항
+
+- **Python**: 3.12 이상
+- **운영체제**: Linux, macOS, Windows
+- **필수 의존성**: `olefile` (>=0.47)
+
+<Tip>
+  Python 3.12 미만 버전을 사용하고 있다면, 먼저 Python을 업그레이드하세요. [Python 공식 웹사이트](https://www.python.org/downloads/)에서 최신 버전을 다운로드할 수 있어요.
+</Tip>
+
+## 다음 단계
+
+설치가 완료되었나요? 이제 첫 문서를 변환해보세요!
+
+<Card
+  title="빠른 시작"
+  icon="rocket"
+  href="/quickstart"
+>
+  5분 안에 HWP 문서를 Markdown으로 변환하는 방법을 배워보세요
+</Card>

@@ -1,0 +1,461 @@
+---
+title: 포맷 확장하기
+description: 새로운 Parser와 Writer를 추가해 지원 포맷을 확장하는 방법을 알아봐요
+---
+
+## 개요
+
+Ureca Document Parser는 Protocol 기반 설계로 새로운 포맷을 쉽게 추가할 수 있어요. 상속 없이 메서드 시그니처만 맞추면 되는 구조적 서브타이핑(structural subtyping)을 사용해요.
+
+이 가이드에서는 다음 두 가지를 배워요:
+- **커스텀 Parser 추가** — 새로운 입력 포맷 지원 (예: TXT, DOCX)
+- **커스텀 Writer 추가** — 새로운 출력 포맷 지원 (예: HTML, JSON)
+
+## Parser 추가하기
+
+### 1. Parser Protocol 이해하기
+
+Parser는 다음 두 정적 메서드를 구현해야 해요:
+
+```python
+from pathlib import Path
+from typing import Protocol
+from ureca_document_parser.models import Document
+
+class Parser(Protocol):
+    @staticmethod
+    def extensions() -> list[str]:
+        """지원하는 파일 확장자 목록"""
+        ...
+    
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        """파일을 파싱해 Document 모델로 변환"""
+        ...
+```
+
+<Note>
+**Protocol의 장점**: 명시적인 상속(`class MyParser(Parser):`) 없이도 메서드 시그니처만 맞으면 Parser로 인식돼요. 이를 구조적 서브타이핑이라고 해요.
+</Note>
+
+### 2. 예제: TXT Parser 구현
+
+간단한 텍스트 파일 Parser를 만들어봐요:
+
+```python
+from pathlib import Path
+from ureca_document_parser.models import Document, Paragraph, Metadata
+
+class TxtParser:
+    """Plain text file parser."""
+    
+    @staticmethod
+    def extensions() -> list[str]:
+        return [".txt"]
+    
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        path = Path(filepath)
+        
+        # 파일 읽기
+        text = path.read_text(encoding="utf-8")
+        
+        # 빈 줄로 문단 분리
+        paragraphs = []
+        for para in text.split("\n\n"):
+            para = para.strip()
+            if para:
+                # 제목 감지 (선택적)
+                heading_level = 0
+                if para.startswith("# "):
+                    heading_level = 1
+                    para = para[2:]
+                elif para.startswith("## "):
+                    heading_level = 2
+                    para = para[3:]
+                
+                paragraphs.append(Paragraph(
+                    text=para,
+                    heading_level=heading_level
+                ))
+        
+        # Document 생성
+        return Document(
+            elements=paragraphs,
+            metadata=Metadata(
+                title=path.stem,
+                source_format="txt"
+            )
+        )
+```
+
+### 3. Registry에 등록하기
+
+#### 방법 1: 수동 등록 (사용자 코드에서)
+
+```python
+from ureca_document_parser import get_registry
+from my_parsers import TxtParser
+
+# Registry 가져오기
+registry = get_registry()
+
+# Parser 등록
+registry.register_parser(TxtParser)
+
+# 이제 .txt 파일 변환 가능
+from ureca_document_parser import convert
+convert("document.txt", "output.md")
+```
+
+#### 방법 2: 자동 등록 (라이브러리에 내장)
+
+라이브러리에 영구적으로 추가하려면 `registry.py`의 `_auto_register()` 함수를 수정하세요:
+
+```python
+# src/ureca_document_parser/registry.py
+
+def _auto_register(registry: FormatRegistry) -> None:
+    from .hwp import HwpParser
+    from .hwpx import HwpxParser
+    from .txt import TxtParser  # 추가
+    from .writers.markdown import MarkdownWriter
+    
+    registry.register_parser(HwpParser)
+    registry.register_parser(HwpxParser)
+    registry.register_parser(TxtParser)  # 등록
+    registry.register_writer(MarkdownWriter)
+```
+
+### 4. Document 모델 활용 팁
+
+Parser는 다음 요소 타입을 생성할 수 있어요:
+
+```python
+from ureca_document_parser.models import (
+    Paragraph,      # 텍스트 문단 (heading_level로 제목 표현)
+    Table,          # 표 (TableRow + TableCell)
+    Image,          # 이미지 (alt_text, source, data)
+    ListItem,       # 목록 항목 (level, ordered)
+    Link,           # 링크 (text, url)
+    HorizontalRule  # 구분선
+)
+```
+
+**예제: 표 생성**
+
+```python
+from ureca_document_parser.models import Table, TableRow, TableCell, Paragraph
+
+table = Table(rows=[
+    TableRow(cells=[
+        TableCell(content=[Paragraph(text="Header 1")]),
+        TableCell(content=[Paragraph(text="Header 2")])
+    ]),
+    TableRow(cells=[
+        TableCell(content=[Paragraph(text="Row 1 Col 1")]),
+        TableCell(content=[Paragraph(text="Row 1 Col 2")])
+    ])
+])
+```
+
+## Writer 추가하기
+
+### 1. Writer Protocol 이해하기
+
+Writer는 다음 세 정적 메서드를 구현해야 해요:
+
+```python
+from ureca_document_parser.models import Document
+
+class Writer(Protocol):
+    @staticmethod
+    def format_name() -> str:
+        """출력 포맷 이름 (예: 'html')"""
+        ...
+    
+    @staticmethod
+    def file_extension() -> str:
+        """파일 확장자 (예: '.html')"""
+        ...
+    
+    @staticmethod
+    def write(doc: Document) -> str:
+        """Document를 출력 포맷 문자열로 변환"""
+        ...
+```
+
+### 2. 예제: HTML Writer 구현
+
+```python
+from ureca_document_parser.models import (
+    Document, Paragraph, Table, Image, ListItem, Link, HorizontalRule
+)
+
+class HtmlWriter:
+    """HTML writer for Document model."""
+    
+    @staticmethod
+    def format_name() -> str:
+        return "html"
+    
+    @staticmethod
+    def file_extension() -> str:
+        return ".html"
+    
+    @staticmethod
+    def write(doc: Document) -> str:
+        parts = ["<!DOCTYPE html>", "<html>", "<head>"]
+        
+        # 메타데이터
+        if doc.metadata.title:
+            parts.append(f"<title>{_escape(doc.metadata.title)}</title>")
+        
+        parts.extend(["</head>", "<body>"])
+        
+        # 요소 변환
+        for elem in doc.elements:
+            if isinstance(elem, Paragraph):
+                if elem.heading_level:
+                    tag = f"h{elem.heading_level}"
+                    parts.append(f"<{tag}>{_escape(elem.text)}</{tag}>")
+                else:
+                    parts.append(f"<p>{_escape(elem.text)}</p>")
+            
+            elif isinstance(elem, Table):
+                parts.append("<table>")
+                for row in elem.rows:
+                    parts.append("<tr>")
+                    for cell in row.cells:
+                        cell_html = "".join(
+                            HtmlWriter.write(Document(elements=cell.content))
+                            for _ in [None]  # 재귀 호출
+                        )
+                        parts.append(f"<td>{cell_html}</td>")
+                    parts.append("</tr>")
+                parts.append("</table>")
+            
+            elif isinstance(elem, Image):
+                parts.append(
+                    f'<img src="{_escape(elem.source)}" '
+                    f'alt="{_escape(elem.alt_text)}" />'
+                )
+            
+            elif isinstance(elem, ListItem):
+                # 연속된 ListItem을 하나의 <ul> 또는 <ol>로 그룹핑
+                # (실제 구현에서는 더 복잡한 로직 필요)
+                tag = "li"
+                parts.append(f"<{tag}>{_escape(elem.text)}</{tag}>")
+            
+            elif isinstance(elem, Link):
+                parts.append(
+                    f'<a href="{_escape(elem.url)}">{_escape(elem.text)}</a>'
+                )
+            
+            elif isinstance(elem, HorizontalRule):
+                parts.append("<hr />")
+        
+        parts.extend(["</body>", "</html>"])
+        return "\n".join(parts)
+
+def _escape(text: str) -> str:
+    """HTML 특수 문자 이스케이프"""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+```
+
+### 3. Registry에 등록하기
+
+```python
+from ureca_document_parser import get_registry
+from my_writers import HtmlWriter
+
+registry = get_registry()
+registry.register_writer(HtmlWriter)
+
+# 이제 HTML로 변환 가능
+from ureca_document_parser import convert
+convert("document.hwp", "output.html", format="html")
+```
+
+## 고급 주제
+
+### 에러 처리
+
+Parser에서 파싱 실패 시 `ParseError`를 발생시키세요:
+
+```python
+from ureca_document_parser.models import ParseError
+
+class MyParser:
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        try:
+            # 파싱 로직
+            ...
+        except Exception as e:
+            raise ParseError(f"Failed to parse {filepath}: {e}") from e
+```
+
+### 의존성 처리
+
+선택적 의존성을 사용하는 Parser는 런타임에 체크하세요:
+
+```python
+class DocxParser:
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        try:
+            import docx  # python-docx
+        except ImportError:
+            raise ImportError(
+                "DOCX support requires python-docx. "
+                "Install it with: pip install python-docx"
+            ) from None
+        
+        # 파싱 로직
+        doc = docx.Document(filepath)
+        ...
+```
+
+### 타입 체킹
+
+`mypy`로 타입 검사를 통과하려면 Protocol을 명시적으로 구현하세요:
+
+```python
+from ureca_document_parser.protocols import Parser
+
+class MyParser:  # Parser를 상속하지 않아도 됨
+    @staticmethod
+    def extensions() -> list[str]:
+        return [".my"]
+    
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        ...
+
+# mypy에서 타입 체크
+def register_my_parser() -> None:
+    from ureca_document_parser import get_registry
+    registry = get_registry()
+    registry.register_parser(MyParser)  # ✅ 타입 안전
+```
+
+## 실전 예제: CSV Parser
+
+CSV 파일을 표(Table)로 변환하는 Parser 예제예요:
+
+```python
+import csv
+from pathlib import Path
+from ureca_document_parser.models import (
+    Document, Table, TableRow, TableCell, Paragraph, Metadata
+)
+
+class CsvParser:
+    @staticmethod
+    def extensions() -> list[str]:
+        return [".csv"]
+    
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        path = Path(filepath)
+        
+        with path.open(encoding="utf-8") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        
+        if not rows:
+            return Document(
+                elements=[],
+                metadata=Metadata(source_format="csv")
+            )
+        
+        # 모든 행을 표로 변환
+        table_rows = []
+        for row in rows:
+            cells = [
+                TableCell(content=[Paragraph(text=cell)])
+                for cell in row
+            ]
+            table_rows.append(TableRow(cells=cells))
+        
+        return Document(
+            elements=[Table(rows=table_rows)],
+            metadata=Metadata(
+                title=path.stem,
+                source_format="csv"
+            )
+        )
+```
+
+**사용 예:**
+
+```python
+from ureca_document_parser import get_registry, convert
+
+# 등록
+registry = get_registry()
+registry.register_parser(CsvParser)
+
+# 변환
+convert("data.csv", "data.md")  # CSV → Markdown 표
+```
+
+## 테스트 가이드
+
+커스텀 Parser/Writer는 반드시 단위 테스트를 작성하세요:
+
+```python
+import pytest
+from pathlib import Path
+from my_parsers import TxtParser
+from ureca_document_parser.models import Document, Paragraph
+
+def test_txt_parser_basic(tmp_path):
+    # 테스트 파일 생성
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Hello\n\nWorld")
+    
+    # 파싱
+    doc = TxtParser.parse(test_file)
+    
+    # 검증
+    assert len(doc.elements) == 2
+    assert isinstance(doc.elements[0], Paragraph)
+    assert doc.elements[0].text == "Hello"
+    assert doc.elements[1].text == "World"
+
+def test_txt_parser_heading():
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("# Title\n\nContent")
+    
+    doc = TxtParser.parse(test_file)
+    
+    assert doc.elements[0].heading_level == 1
+    assert doc.elements[0].text == "Title"
+```
+
+## 참고 자료
+
+<CardGroup cols={2}>
+  <Card title="아키텍처" icon="sitemap" href="/architecture">
+    내부 설계와 모듈 구조를 자세히 알아봐요
+  </Card>
+  
+  <Card title="Parser Protocol" icon="code" href="/api/models">
+    Parser와 Writer Protocol의 전체 API 문서예요
+  </Card>
+  
+  <Card title="Document 모델" icon="file-lines" href="/api/models">
+    모든 DocumentElement 타입의 상세 명세예요
+  </Card>
+  
+  <Card title="기존 Parser 소스" icon="github" href="https://github.com/ureca-corp/document_parser/tree/main/src/ureca_document_parser">
+    HWP/HWPX Parser의 실제 구현을 참고하세요
+  </Card>
+</CardGroup>

@@ -1,0 +1,312 @@
+---
+title: "Python API 사용 가이드"
+description: "Python API로 HWP/HWPX 문서를 Markdown으로 변환하는 방법을 배워요"
+---
+
+## 개요
+
+`ureca_document_parser`는 간단한 `convert()` 함수 하나로 모든 변환 작업을 처리해요. 이 가이드에서는 다양한 사용 시나리오와 실제 예제를 소개할게요.
+
+## 기본 사용법
+
+### 파일로 저장하기
+
+가장 기본적인 사용법이에요. 입력 파일과 출력 파일 경로를 지정하면 변환된 Markdown을 파일로 저장해요.
+
+```python
+from ureca_document_parser import convert
+
+# HWP 파일을 Markdown으로 변환
+convert("보고서.hwp", "보고서.md")
+
+# HWPX 파일도 동일하게 처리
+convert("제안서.hwpx", "제안서.md")
+```
+
+<Info>
+출력 경로의 디렉토리가 없으면 자동으로 생성돼요. `Path.mkdir(parents=True, exist_ok=True)`로 처리되므로 중첩된 경로도 안전하게 사용할 수 있어요.
+</Info>
+
+### 문자열로 반환받기
+
+출력 경로를 생략하면 변환된 Markdown을 문자열로 반환받아요.
+
+```python
+from ureca_document_parser import convert
+
+# 변환 결과를 문자열로 받기
+markdown = convert("보고서.hwp")
+print(markdown)
+
+# 다른 처리에 사용
+processed = markdown.replace("구버전", "신버전")
+with open("수정본.md", "w", encoding="utf-8") as f:
+    f.write(processed)
+```
+
+## 고급 사용법
+
+### 출력 포맷 지정
+
+기본적으로 Markdown으로 변환되지만, `format` 파라미터로 다른 포맷을 지정할 수 있어요.
+
+```python
+from ureca_document_parser import convert
+
+# 명시적으로 포맷 지정
+convert("보고서.hwp", "보고서.md", format="markdown")
+```
+
+<Note>
+현재는 `markdown` 포맷만 지원해요. 향후 HTML, JSON 등 다른 포맷이 추가될 예정이에요.
+</Note>
+
+### Path 객체 사용
+
+`pathlib.Path` 객체도 입력으로 받을 수 있어요.
+
+```python
+from pathlib import Path
+from ureca_document_parser import convert
+
+input_path = Path("documents/보고서.hwp")
+output_path = Path("output/보고서.md")
+
+convert(input_path, output_path)
+```
+
+## 일괄 변환
+
+여러 파일을 한 번에 변환하는 예제예요.
+
+<CodeGroup>
+
+```python 기본 루프
+from pathlib import Path
+from ureca_document_parser import convert
+
+input_dir = Path("documents")
+output_dir = Path("output")
+
+# 모든 HWP/HWPX 파일 찾기
+for file in input_dir.glob("*.hwp"):
+    output_file = output_dir / f"{file.stem}.md"
+    convert(file, output_file)
+    print(f"변환 완료: {file.name} → {output_file.name}")
+
+for file in input_dir.glob("*.hwpx"):
+    output_file = output_dir / f"{file.stem}.md"
+    convert(file, output_file)
+    print(f"변환 완료: {file.name} → {output_file.name}")
+```
+
+```python 에러 처리 포함
+from pathlib import Path
+from ureca_document_parser import convert, ParseError
+
+input_dir = Path("documents")
+output_dir = Path("output")
+
+# 모든 문서 파일 패턴
+patterns = ["*.hwp", "*.hwpx"]
+
+for pattern in patterns:
+    for file in input_dir.glob(pattern):
+        output_file = output_dir / f"{file.stem}.md"
+        try:
+            convert(file, output_file)
+            print(f"✓ {file.name}")
+        except ParseError as e:
+            print(f"✗ {file.name}: {e}")
+        except Exception as e:
+            print(f"✗ {file.name}: 알 수 없는 오류 - {e}")
+```
+
+```python 병렬 처리
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from ureca_document_parser import convert
+
+def convert_file(file: Path) -> str:
+    output_file = Path("output") / f"{file.stem}.md"
+    convert(file, output_file)
+    return f"변환 완료: {file.name}"
+
+input_dir = Path("documents")
+files = list(input_dir.glob("*.hwp")) + list(input_dir.glob("*.hwpx"))
+
+# 최대 4개 스레드로 병렬 처리
+with ThreadPoolExecutor(max_workers=4) as executor:
+    results = executor.map(convert_file, files)
+    for result in results:
+        print(result)
+```
+
+</CodeGroup>
+
+## 함수 시그니처
+
+`convert()` 함수의 전체 시그니처는 다음과 같아요:
+
+```python
+def convert(
+    input_path: str | Path,
+    output_path: str | Path | None = None,
+    *,
+    format: str = "markdown",
+    chunks: bool = False,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+) -> str | list[LCDocument] | None:
+```
+
+### 파라미터
+
+<ParamField path="input_path" type="str | Path" required>
+  변환할 HWP 또는 HWPX 파일의 경로예요.
+</ParamField>
+
+<ParamField path="output_path" type="str | Path | None" default="None">
+  출력 파일 경로예요. `None`이면 문자열로 반환하고, 지정하면 파일로 저장해요. `chunks=True`일 때는 무시돼요.
+</ParamField>
+
+<ParamField path="format" type="str" default="markdown">
+  출력 포맷 이름이에요. 현재는 `"markdown"`만 지원해요.
+</ParamField>
+
+<ParamField path="chunks" type="bool" default="False">
+  `True`면 LangChain Document 청크로 반환해요. 자세한 내용은 [LangChain 가이드](/guides/langchain)를 참고하세요.
+</ParamField>
+
+<ParamField path="chunk_size" type="int" default="1000">
+  청크 크기예요. `chunks=True`일 때만 사용돼요.
+</ParamField>
+
+<ParamField path="chunk_overlap" type="int" default="200">
+  청크 오버랩 크기예요. `chunks=True`일 때만 사용돼요.
+</ParamField>
+
+### 반환값
+
+<ResponseField name="반환 타입" type="str | list[LCDocument] | None">
+  - `chunks=True`: LangChain Document 리스트
+  - `chunks=False`, `output_path=None`: 변환된 Markdown 문자열
+  - `chunks=False`, `output_path` 지정: `None` (파일에 저장됨)
+</ResponseField>
+
+## 에러 처리
+
+### ParseError
+
+문서 파싱 중 오류가 발생하면 `ParseError`가 발생해요.
+
+```python
+from ureca_document_parser import convert, ParseError
+
+try:
+    convert("손상된파일.hwp", "출력.md")
+except ParseError as e:
+    print(f"파싱 실패: {e}")
+```
+
+### ValueError
+
+지원하지 않는 파일 형식이나 포맷을 지정하면 `ValueError`가 발생해요.
+
+```python
+from ureca_document_parser import convert
+
+try:
+    convert("문서.docx", "출력.md")  # .docx는 지원 안 함
+except ValueError as e:
+    print(f"오류: {e}")
+    # 출력: 오류: 지원하지 않는 파일 형식입니다: .docx (지원: .hwp, .hwpx)
+```
+
+### ImportError (LangChain)
+
+`chunks=True`로 LangChain 청크를 요청했지만 LangChain이 설치되지 않았으면 `ImportError`가 발생해요.
+
+```python
+from ureca_document_parser import convert
+
+try:
+    chunks = convert("보고서.hwp", chunks=True)
+except ImportError as e:
+    print(f"오류: {e}")
+    # 출력: chunks=True requires the langchain extra. 
+    #       Install it with: pip install ureca_document_parser[langchain]
+```
+
+<Warning>
+`chunks=True`를 사용하려면 반드시 `ureca_document_parser[langchain]` extra와 함께 설치해야 해요.
+</Warning>
+
+## 실전 예제
+
+### 디렉토리 구조 유지하며 변환
+
+입력 디렉토리의 구조를 그대로 유지하면서 변환하는 예제예요.
+
+```python
+from pathlib import Path
+from ureca_document_parser import convert
+
+input_root = Path("documents")
+output_root = Path("output")
+
+# 재귀적으로 모든 HWP/HWPX 파일 찾기
+for pattern in ["**/*.hwp", "**/*.hwpx"]:
+    for file in input_root.glob(pattern):
+        # 상대 경로 계산
+        rel_path = file.relative_to(input_root)
+        output_file = output_root / rel_path.with_suffix(".md")
+        
+        # 출력 디렉토리 생성 (자동으로 처리됨)
+        convert(file, output_file)
+        print(f"{rel_path} → {output_file.relative_to(output_root)}")
+```
+
+### 변환 결과를 메모리에서 처리
+
+파일로 저장하지 않고 변환 결과를 바로 사용하는 예제예요.
+
+```python
+from ureca_document_parser import convert
+import re
+
+# 변환 결과를 문자열로 받기
+markdown = convert("기술문서.hwp")
+
+# 정규식으로 헤딩 추출
+headings = re.findall(r'^#{1,6}\s+(.+)$', markdown, re.MULTILINE)
+print("목차:")
+for heading in headings:
+    print(f"- {heading}")
+
+# 단어 수 세기
+word_count = len(markdown.split())
+print(f"\n총 단어 수: {word_count}")
+```
+
+## 다음 단계
+
+<CardGroup cols={2}>
+
+<Card title="CLI 사용하기" icon="terminal" href="/guides/cli">
+  커맨드라인에서 바로 변환하는 방법을 알아보세요
+</Card>
+
+<Card title="LangChain 연동" icon="link" href="/guides/langchain">
+  RAG 파이프라인에서 사용하는 방법을 알아보세요
+</Card>
+
+<Card title="고급 사용법" icon="code" href="/guides/advanced">
+  Document 모델을 직접 다루는 방법을 알아보세요
+</Card>
+
+<Card title="API 레퍼런스" icon="book" href="/api/convert">
+  전체 API 문서를 확인하세요
+</Card>
+
+</CardGroup>

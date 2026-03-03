@@ -1,0 +1,199 @@
+---
+title: "HWP 포맷"
+description: "아래한글 바이너리 포맷 (HWP v5.0+) 파서 가이드"
+---
+
+## 개요
+
+HWP는 한컴오피스 아래한글에서 사용하는 바이너리 문서 포맷이에요. `.hwp` 확장자를 사용하며, 대한민국 정부 및 공공기관에서 널리 쓰이는 표준 문서 포맷이에요.
+
+### 기술 스펙
+
+- **파일 구조**: OLE2 (Object Linking and Embedding) 기반 복합 문서 포맷
+- **지원 버전**: HWP v5.0 이상
+- **인코딩**: UTF-16LE
+- **압축**: zlib 기반 선택적 압축 지원
+
+<Note>
+  HWP v5.0 미만의 오래된 파일은 지원하지 않아요. 한컴오피스에서 최신 포맷으로 저장 후 사용하세요.
+</Note>
+
+## 파일 구조
+
+HWP 파일은 내부적으로 여러 스트림(stream)으로 구성된 OLE2 컨테이너예요:
+
+```
+HWP File (OLE2 Container)
+├── FileHeader          # 파일 메타정보 및 압축 플래그
+├── DocInfo            # 문서 설정 및 스타일 테이블
+├── BodyText/
+│   ├── Section0       # 첫 번째 섹션 본문
+│   ├── Section1       # 두 번째 섹션 본문
+│   └── ...
+└── PrvText            # 미리보기 텍스트 (폴백용)
+```
+
+### 파싱 파이프라인
+
+HWP 파서는 다음 단계로 동작해요:
+
+1. **OLE2 파일 열기** — `olefile` 라이브러리로 컨테이너 파싱
+2. **압축 확인** — `FileHeader` 스트림에서 압축 여부 확인 (`src/ureca_document_parser/hwp/parser.py:34`)
+3. **스타일 테이블 추출** — `DocInfo` 스트림에서 제목 레벨 매핑 생성 (`src/ureca_document_parser/hwp/parser.py:45`)
+4. **섹션별 파싱** — 각 `BodyText/Section*` 스트림을 순회하며:
+   - 압축된 경우 zlib 압축 해제
+   - 바이너리 레코드 스트림 파싱 (`src/ureca_document_parser/hwp/records.py`)
+   - 문자 데이터 추출 (`src/ureca_document_parser/hwp/text.py`)
+   - 테이블 구조 재구성 (`src/ureca_document_parser/hwp/tables.py`)
+5. **Document 모델 생성** — Paragraph, Table 요소로 변환
+
+## 사용 예시
+
+### 기본 변환
+
+```python
+from ureca_document_parser import convert
+
+# HWP → Markdown 변환
+convert("공공사업계획서.hwp", "공공사업계획서.md")
+```
+
+### Document 모델 직접 다루기
+
+```python
+from ureca_document_parser.hwp import HwpParser
+
+# Document 객체 얻기
+doc = HwpParser.parse("보고서.hwp")
+
+# 요소 순회
+for element in doc.elements:
+    if isinstance(element, Paragraph):
+        print(f"레벨 {element.heading_level}: {element.text}")
+    elif isinstance(element, Table):
+        print(f"표: {len(element.rows)}행")
+```
+
+### LangChain 청크 변환
+
+```python
+from ureca_document_parser import convert
+
+# RAG 파이프라인용 청크 생성
+chunks = convert(
+    "정책문서.hwp",
+    chunks=True,
+    chunk_size=1000,
+    chunk_overlap=200
+)
+
+for chunk in chunks:
+    print(chunk.page_content)
+    print(chunk.metadata)
+```
+
+## 지원 기능
+
+### 텍스트 추출
+
+- 일반 문단
+- 제목 (스타일 기반 자동 감지)
+- 탭 및 줄바꿈 보존
+- UTF-16LE 문자 처리
+
+### 표 (Table) 파싱
+
+HWP 파서는 3단계 테이블 파싱 알고리즘을 사용해요:
+
+1. **Phase 1**: 테이블 컨트롤 헤더 탐지 (`CTRL_HEADER` 레코드, ctrl_id == 0x74626C 'tbl')
+2. **Phase 2**: 테이블 차원 읽기 (`HWPTAG_TABLE` 레코드에서 행/열 수 추출)
+3. **Phase 3**: 셀 내용 수집 (`LIST_HEADER` + `PARA_TEXT` 레코드 순회)
+
+중첩 테이블도 재귀적으로 파싱해요.
+
+### 섹션 헤더 테이블 자동 변환
+
+한국 공공기관 문서에서 자주 나타나는 패턴인 "표로 꾸민 섹션 제목"을 자동으로 감지하여 Heading으로 변환해요:
+
+**감지 패턴**:
+- 2행 이하
+- 4열 구조: `[번호, 빈칸, 제목, 빈칸]`
+- 번호 셀은 숫자만 포함
+- 나머지 행은 비어있음
+
+**예시**:
+```
+| 1 |  | 사업개요 |  |  →  ## 1. 사업개요
+```
+
+이 기능은 `src/ureca_document_parser/hwp/parser.py:115`의 `_try_extract_section_heading` 함수에서 구현되어 있어요.
+
+## 제한사항
+
+<Warning>
+  다음 기능은 현재 버전에서 지원하지 않아요:
+</Warning>
+
+- **이미지 추출** — 이미지는 대체 텍스트(`[Image]`)로만 표시돼요
+- **도형 및 차트** — 벡터 그래픽 객체는 무시돼요
+- **머리글/바닥글** — 본문 영역만 추출돼요
+- **각주/미주** — 주석 스트림은 파싱하지 않아요
+- **복잡한 표 병합** — 일부 셀 병합 구조는 평탄화될 수 있어요
+- **매크로 및 스크립트** — 실행 코드는 무시돼요
+
+### 폴백 동작
+
+`BodyText` 스트림에서 추출에 실패하면, 자동으로 `PrvText` 스트림(미리보기 텍스트)을 사용해요. 이 경우 서식 정보는 손실되지만 텍스트는 복구할 수 있어요.
+
+```python
+# 폴백 동작 (src/ureca_document_parser/hwp/parser.py:231)
+if not doc.elements and ole.exists("PrvText"):
+    text = ole.openstream("PrvText").read().decode("utf-16-le")
+    # 줄 단위로 Paragraph 생성
+```
+
+## 의존성
+
+HWP 파서는 다음 라이브러리를 필수로 사용해요:
+
+- [olefile](https://olefile.readthedocs.io/) — OLE2 파일 파싱
+
+설치는 자동으로 포함돼요:
+
+```bash
+uv add ureca_document_parser
+```
+
+## 문제 해결
+
+### "유효한 HWP 파일이 아닙니다" 오류
+
+**원인**: 파일이 OLE2 구조가 아니거나 손상된 경우
+
+**해결**:
+1. 한컴오피스에서 파일을 열어 정상 작동 확인
+2. "다른 이름으로 저장"으로 새 파일 생성
+3. HWP 버전 확인 (v5.0 이상 필요)
+
+### 텍스트가 깨져서 나오는 경우
+
+**원인**: 인코딩 오류 또는 확장 제어문자 처리 오류
+
+**해결**:
+- 파일이 실제 HWP v5 포맷인지 확인 (구버전 파일은 지원 안 함)
+- 이슈 리포트 시 샘플 파일 첨부 권장
+
+### 표가 올바르게 파싱되지 않는 경우
+
+**원인**: 복잡한 셀 병합 또는 중첩 구조
+
+**해결**:
+- 현재 버전에서는 단순 표 구조만 완벽히 지원해요
+- 복잡한 표는 Markdown 테이블 문법 제약으로 인해 평탄화될 수 있어요
+- [이슈 트래커](https://github.com/ureca-corp/document_parser/issues)에 케이스 리포트 환영해요
+
+## 참고 자료
+
+- [HWP Binary Specification 1.1](https://www.hancom.com/cs_center/csDownload.do) — 한컴 공식 스펙 문서
+- [olefile 문서](https://olefile.readthedocs.io/) — OLE2 파싱 라이브러리
+- [소스 코드](https://github.com/ureca-corp/document_parser/tree/main/src/ureca_document_parser/hwp) — HWP 파서 구현

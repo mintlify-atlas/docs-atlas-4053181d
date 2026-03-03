@@ -1,0 +1,194 @@
+---
+title: PdfParser
+description: PDF 포맷 파서 API 레퍼런스
+---
+
+# PdfParser
+
+PDF 파일을 파싱하여 `Document` 모델로 변환하는 파서예요.
+
+## 개요
+
+`PdfParser`는 [PyMuPDF](https://pymupdf.readthedocs.io/) (fitz) 라이브러리를 사용하여 PDF 파일에서 텍스트를 추출해요. PDF 메타데이터(제목, 저자, 페이지 수 등)도 함께 추출합니다.
+
+<Note>
+  PDF 파싱 기능은 선택적 의존성이에요. 설치가 필요해요:
+  
+  ```bash
+  uv add ureca_document_parser[pdf]
+  ```
+</Note>
+
+## 클래스 메서드
+
+### `extensions()`
+
+지원하는 파일 확장자 목록을 반환해요.
+
+```python
+@staticmethod
+def extensions() -> list[str]
+```
+
+<ResponseField name="return" type="list[str]">
+  지원하는 확장자 리스트. PDF 파서의 경우 `[".pdf"]`를 반환해요.
+</ResponseField>
+
+**사용 예시**
+
+```python
+from ureca_document_parser.pdf import PdfParser
+
+print(PdfParser.extensions())  # [".pdf"]
+```
+
+### `parse()`
+
+PDF 파일을 파싱하여 `Document` 객체를 반환해요.
+
+```python
+@staticmethod
+def parse(file_path: str | PathLike[str]) -> Document
+```
+
+<ParamField path="file_path" type="str | PathLike[str]" required>
+  파싱할 PDF 파일의 경로. 문자열 또는 `PathLike` 객체를 받아요.
+</ParamField>
+
+<ResponseField name="return" type="Document">
+  파싱된 문서 객체. `elements` 리스트에 `Paragraph` 요소들이 포함되고, `metadata`에 PDF 메타데이터가 저장돼요.
+</ResponseField>
+
+**예외**
+
+- `ParseError` — PDF 파일을 파싱할 수 없거나 PyMuPDF가 설치되지 않은 경우 발생해요.
+
+**사용 예시**
+
+```python
+from ureca_document_parser.pdf import PdfParser
+from pathlib import Path
+
+# 문자열 경로 사용
+doc = PdfParser.parse("보고서.pdf")
+
+# Path 객체 사용
+path = Path("논문.pdf")
+doc = PdfParser.parse(path)
+
+# 메타데이터 접근
+print(f"제목: {doc.metadata.title}")
+print(f"저자: {doc.metadata.author}")
+print(f"페이지 수: {doc.metadata.extra['pages']}")
+
+# 텍스트 추출
+for element in doc.elements:
+    print(element.text)
+```
+
+## Parser Protocol 구현
+
+`PdfParser`는 `Parser` 프로토콜을 구현해요. 상속 없이 정적 메서드 시그니처만 맞추면 되는 구조적 서브타이핑(structural subtyping) 방식이에요.
+
+```python
+class Parser(Protocol):
+    @staticmethod
+    def extensions() -> list[str]:
+        """지원하는 파일 확장자 리스트"""
+        ...
+
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        """파일을 파싱하여 Document 반환"""
+        ...
+```
+
+## 레지스트리 등록
+
+`PdfParser`는 PyMuPDF가 설치된 경우 자동으로 `FormatRegistry`에 등록돼요. 수동 등록이 필요한 경우:
+
+```python
+from ureca_document_parser import get_registry
+from ureca_document_parser.pdf import PdfParser
+
+registry = get_registry()
+registry.register_parser(PdfParser)
+```
+
+등록 후에는 확장자 기반 자동 라우팅이 가능해요:
+
+```python
+from ureca_document_parser import get_registry
+
+registry = get_registry()
+doc = registry.parse("문서.pdf")  # PdfParser가 자동으로 선택됨
+```
+
+## 내부 구현 세부사항
+
+### 메타데이터 추출
+
+PDF 파일의 메타데이터를 `Document.metadata`에 저장해요:
+
+- `title`: PDF 제목 (없으면 파일명 사용)
+- `author`: 저자 정보
+- `source_format`: 항상 `"pdf"`
+- `extra`: 추가 정보 (페이지 수, producer, creator 등)
+
+```python
+metadata = Metadata(
+    title=doc.metadata.get("title") or path.stem,
+    author=doc.metadata.get("author") or "",
+    source_format="pdf",
+    extra={
+        "pages": doc.page_count,
+        "producer": doc.metadata.get("producer", ""),
+        "creator": doc.metadata.get("creator", ""),
+    },
+)
+```
+
+### 텍스트 추출 전략
+
+각 페이지에서 텍스트를 추출할 때 다음 단계를 거쳐요:
+
+1. **페이지별 텍스트 추출**: `page.get_text()`로 전체 텍스트 가져오기
+2. **문단 분리**: 이중 개행(`\n\n`)을 기준으로 문단 나누기
+3. **공백 정리**: 연속된 공백과 개행을 하나의 공백으로 정리
+4. **빈 문단 제거**: 공백만 있는 문단은 스킵
+
+```python
+for page in doc:
+    text = page.get_text()
+    paragraphs = text.split("\n\n")
+    
+    for para_text in paragraphs:
+        cleaned = " ".join(para_text.split())
+        if cleaned:
+            elements.append(Paragraph(text=cleaned, heading_level=0))
+```
+
+### 제목 레벨
+
+현재 구현에서는 PDF에서 제목 레벨을 자동 감지하지 않아요. 모든 문단의 `heading_level`은 `0`으로 설정돼요. 향후 업데이트에서 폰트 크기 기반 제목 감지가 추가될 수 있어요.
+
+### 의존성 체크
+
+PyMuPDF가 설치되지 않은 경우 명확한 에러 메시지와 함께 설치 안내를 제공해요:
+
+```python
+try:
+    import fitz  # pymupdf
+except ImportError:
+    raise ParseError(
+        "PDF support requires pymupdf. "
+        "Install with: pip install ureca_document_parser[pdf]"
+    ) from None
+```
+
+## 참고
+
+- [Parser Protocol](/api/core/protocols#parser)
+- [Document 모델](/api/core/models#document)
+- [FormatRegistry](/api/core/registry)
+- [PyMuPDF 공식 문서](https://pymupdf.readthedocs.io/)

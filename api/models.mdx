@@ -1,0 +1,575 @@
+---
+title: 'Document 모델'
+description: '파서와 Writer 간의 중간 표현 구조예요'
+icon: 'file-lines'
+---
+
+## 개요
+
+Document 모델은 모든 파서가 생성하고 모든 Writer가 소비하는 공통 데이터 구조예요. 포맷에 독립적인 중간 표현으로, 새로운 입력/출력 포맷을 쉽게 추가할 수 있게 해줘요.
+
+## Document
+
+### 클래스 정의
+
+```python
+@dataclass
+class Document:
+    elements: list[DocumentElement] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=Metadata)
+```
+
+문서의 최상위 컨테이너예요. 문서 요소들의 리스트와 메타데이터로 구성돼요.
+
+<ParamField path="elements" type="list[DocumentElement]" default="[]">
+  문서를 구성하는 요소들의 순서가 있는 리스트예요. [DocumentElement](#documentelement) 타입의 객체들이 들어가요.
+</ParamField>
+
+<ParamField path="metadata" type="Metadata" default="Metadata()">
+  문서의 메타데이터예요. 제목, 저자, 원본 포맷 등의 정보를 담아요.
+</ParamField>
+
+## DocumentElement
+
+```python
+type DocumentElement = Paragraph | Table | Image | ListItem | Link | HorizontalRule
+```
+
+문서를 구성할 수 있는 모든 요소의 타입 별칭이예요. 다음 6가지 타입 중 하나일 수 있어요:
+
+- [Paragraph](#paragraph) - 텍스트 단락
+- [Table](#table) - 표
+- [Image](#image) - 이미지
+- [ListItem](#listitem) - 리스트 항목
+- [Link](#link) - 하이퍼링크
+- [HorizontalRule](#horizontalrule) - 수평선
+
+## 요소 타입
+
+### Paragraph
+
+```python
+@dataclass
+class Paragraph:
+    text: str
+    heading_level: int = 0  # 0 = normal, 1-6 = heading
+```
+
+텍스트 단락 또는 제목을 나타내요.
+
+<ParamField path="text" type="str" required>
+  단락의 텍스트 내용이예요.
+</ParamField>
+
+<ParamField path="heading_level" type="int" default="0">
+  제목 레벨이예요:
+  - `0`: 일반 단락
+  - `1-6`: HTML의 h1-h6에 해당하는 제목 레벨
+</ParamField>
+
+**예시:**
+```python
+from ureca_document_parser.models import Paragraph
+
+# 일반 단락
+para = Paragraph(text="본문 텍스트입니다.")
+
+# 제목
+heading = Paragraph(text="서론", heading_level=2)
+```
+
+### Table
+
+```python
+@dataclass
+class Table:
+    rows: list[TableRow] = field(default_factory=list)
+
+@dataclass
+class TableRow:
+    cells: list[TableCell] = field(default_factory=list)
+
+@dataclass
+class TableCell:
+    content: list[Paragraph | Table] = field(default_factory=list)
+```
+
+표 구조를 나타내요. 행(Row) → 셀(Cell) → 내용의 3단계 구조로 되어 있어요.
+
+<ParamField path="Table.rows" type="list[TableRow]" default="[]">
+  표의 행들이예요.
+</ParamField>
+
+<ParamField path="TableRow.cells" type="list[TableCell]" default="[]">
+  행의 셀들이예요.
+</ParamField>
+
+<ParamField path="TableCell.content" type="list[Paragraph | Table]" default="[]">
+  셀 내부의 내용이예요. 단락이나 중첩된 표를 포함할 수 있어요.
+</ParamField>
+
+**예시:**
+```python
+from ureca_document_parser.models import Table, TableRow, TableCell, Paragraph
+
+# 2x2 표 생성
+table = Table(rows=[
+    TableRow(cells=[
+        TableCell(content=[Paragraph(text="헤더 1")]),
+        TableCell(content=[Paragraph(text="헤더 2")])
+    ]),
+    TableRow(cells=[
+        TableCell(content=[Paragraph(text="데이터 1")]),
+        TableCell(content=[Paragraph(text="데이터 2")])
+    ])
+])
+```
+
+### Image
+
+```python
+@dataclass
+class Image:
+    alt_text: str = ""
+    source: str = ""
+    data: bytes = b""
+    ocr_text: str = ""
+```
+
+이미지를 나타내요.
+
+<ParamField path="alt_text" type="str" default="''">
+  이미지 대체 텍스트예요.
+</ParamField>
+
+<ParamField path="source" type="str" default="''">
+  원본 이미지 경로 또는 파일명이예요.
+</ParamField>
+
+<ParamField path="data" type="bytes" default="b''">
+  이미지의 바이너리 데이터예요.
+</ParamField>
+
+<ParamField path="ocr_text" type="str" default="''">
+  OCR로 추출한 텍스트예요 (선택적).
+</ParamField>
+
+**예시:**
+```python
+from ureca_document_parser.models import Image
+
+image = Image(
+    alt_text="회사 로고",
+    source="logo.png",
+    data=b"...binary data...",
+    ocr_text="ACME Corp"
+)
+```
+
+### ListItem
+
+```python
+@dataclass
+class ListItem:
+    text: str = ""
+    level: int = 0
+    ordered: bool = False
+```
+
+리스트 항목을 나타내요. 순서 있는 리스트와 없는 리스트를 모두 지원해요.
+
+<ParamField path="text" type="str" default="''">
+  리스트 항목의 텍스트예요.
+</ParamField>
+
+<ParamField path="level" type="int" default="0">
+  중첩 레벨이예요 (0 = 최상위).
+</ParamField>
+
+<ParamField path="ordered" type="bool" default="False">
+  `True`면 순서 있는 리스트 (1, 2, 3...), `False`면 순서 없는 리스트 (•)예요.
+</ParamField>
+
+**예시:**
+```python
+from ureca_document_parser.models import ListItem
+
+# 순서 없는 리스트
+item1 = ListItem(text="첫 번째 항목", level=0, ordered=False)
+
+# 순서 있는 리스트
+item2 = ListItem(text="두 번째 항목", level=0, ordered=True)
+
+# 중첩 리스트
+item3 = ListItem(text="하위 항목", level=1, ordered=False)
+```
+
+### Link
+
+```python
+@dataclass
+class Link:
+    text: str = ""
+    url: str = ""
+```
+
+하이퍼링크를 나타내요.
+
+<ParamField path="text" type="str" default="''">
+  링크 텍스트예요.
+</ParamField>
+
+<ParamField path="url" type="str" default="''">
+  링크 URL이예요.
+</ParamField>
+
+**예시:**
+```python
+from ureca_document_parser.models import Link
+
+link = Link(
+    text="문서 바로가기",
+    url="https://example.com/docs"
+)
+```
+
+### HorizontalRule
+
+```python
+@dataclass
+class HorizontalRule:
+    pass
+```
+
+수평선을 나타내요. 속성이 없어요.
+
+**예시:**
+```python
+from ureca_document_parser.models import HorizontalRule
+
+rule = HorizontalRule()
+```
+
+## Metadata
+
+```python
+@dataclass
+class Metadata:
+    title: str = ""
+    author: str = ""
+    source_format: str = ""
+    extra: dict[str, str] = field(default_factory=dict)
+```
+
+문서의 메타데이터를 담는 구조예요.
+
+<ParamField path="title" type="str" default="''">
+  문서 제목이예요.
+</ParamField>
+
+<ParamField path="author" type="str" default="''">
+  문서 작성자예요.
+</ParamField>
+
+<ParamField path="source_format" type="str" default="''">
+  원본 파일 포맷이예요 (예: "hwp", "hwpx", "pdf").
+</ParamField>
+
+<ParamField path="extra" type="dict[str, str]" default="{}">
+  추가 메타데이터를 저장하는 딕셔너리예요. 포맷별 특수한 정보를 담을 수 있어요.
+</ParamField>
+
+**예시:**
+```python
+from ureca_document_parser.models import Metadata
+
+metadata = Metadata(
+    title="2024년 연간 보고서",
+    author="홍길동",
+    source_format="hwp",
+    extra={
+        "created_date": "2024-01-15",
+        "department": "기획팀"
+    }
+)
+```
+
+## ParseError
+
+```python
+class ParseError(Exception):
+    """Raised when a document cannot be parsed."""
+```
+
+문서를 파싱할 수 없을 때 발생하는 예외예요.
+
+**예시:**
+```python
+from ureca_document_parser import convert, ParseError
+
+try:
+    result = convert("손상된파일.hwp")
+except ParseError as e:
+    print(f"파싱 실패: {e}")
+```
+
+## 프로토콜
+
+### Parser 프로토콜
+
+```python
+class Parser(Protocol):
+    """Protocol for document parsers (e.g. HWP, HWPX, PDF)."""
+    
+    @staticmethod
+    def extensions() -> list[str]:
+        """Supported file extensions, e.g. ['.hwp']."""
+        ...
+    
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        """Parse a file and return a Document."""
+        ...
+```
+
+파서가 구현해야 하는 인터페이스예요. 상속이 아닌 구조적 서브타이핑(structural subtyping)을 사용해요.
+
+<ParamField path="extensions()" type="() -> list[str]" required>
+  이 파서가 처리할 수 있는 파일 확장자 리스트를 반환해요.
+</ParamField>
+
+<ParamField path="parse()" type="(filepath: Path | str) -> Document" required>
+  파일을 파싱하여 Document 객체로 반환해요.
+</ParamField>
+
+**예시:**
+```python
+from pathlib import Path
+from ureca_document_parser.models import Document, Paragraph, Metadata
+
+class SimpleTextParser:
+    @staticmethod
+    def extensions() -> list[str]:
+        return [".txt"]
+    
+    @staticmethod
+    def parse(filepath: Path | str) -> Document:
+        path = Path(filepath)
+        text = path.read_text(encoding="utf-8")
+        
+        return Document(
+            elements=[
+                Paragraph(text=line)
+                for line in text.split("\n")
+                if line.strip()
+            ],
+            metadata=Metadata(
+                source_format="txt",
+                title=path.stem
+            )
+        )
+```
+
+### Writer 프로토콜
+
+```python
+class Writer(Protocol):
+    """Protocol for document writers (e.g. Markdown, HTML)."""
+    
+    @staticmethod
+    def format_name() -> str:
+        """Output format name, e.g. 'markdown'."""
+        ...
+    
+    @staticmethod
+    def file_extension() -> str:
+        """Output file extension, e.g. '.md'."""
+        ...
+    
+    @staticmethod
+    def write(doc: Document) -> str:
+        """Convert a Document to the output format string."""
+        ...
+```
+
+Writer가 구현해야 하는 인터페이스예요.
+
+<ParamField path="format_name()" type="() -> str" required>
+  출력 포맷 이름을 반환해요 (예: "markdown", "html").
+</ParamField>
+
+<ParamField path="file_extension()" type="() -> str" required>
+  출력 파일의 확장자를 반환해요 (예: ".md", ".html").
+</ParamField>
+
+<ParamField path="write()" type="(doc: Document) -> str" required>
+  Document를 출력 포맷 문자열로 변환해요.
+</ParamField>
+
+**예시:**
+```python
+from ureca_document_parser.models import Document, Paragraph, Table
+
+class PlainTextWriter:
+    @staticmethod
+    def format_name() -> str:
+        return "plain"
+    
+    @staticmethod
+    def file_extension() -> str:
+        return ".txt"
+    
+    @staticmethod
+    def write(doc: Document) -> str:
+        lines = []
+        
+        for elem in doc.elements:
+            if isinstance(elem, Paragraph):
+                lines.append(elem.text)
+            elif isinstance(elem, Table):
+                lines.append("[표]")  # 간단히 표시
+        
+        return "\n".join(lines)
+```
+
+## 사용 예시
+
+<CodeGroup>
+
+```python Document 생성
+from ureca_document_parser.models import (
+    Document,
+    Paragraph,
+    ListItem,
+    Metadata
+)
+
+# 프로그래밍 방식으로 Document 생성
+doc = Document(
+    metadata=Metadata(
+        title="샘플 문서",
+        author="작성자",
+        source_format="manual"
+    ),
+    elements=[
+        Paragraph(text="제목", heading_level=1),
+        Paragraph(text="본문 내용입니다."),
+        ListItem(text="첫 번째 항목", ordered=True),
+        ListItem(text="두 번째 항목", ordered=True),
+    ]
+)
+```
+
+```python Document 순회
+from ureca_document_parser import convert
+from ureca_document_parser import get_registry
+from ureca_document_parser.models import Paragraph, Table, Image
+
+# 파일 파싱
+registry = get_registry()
+doc = registry.parse("보고서.hwp")
+
+# 요소별로 처리
+for elem in doc.elements:
+    if isinstance(elem, Paragraph):
+        if elem.heading_level:
+            print(f"[제목 {elem.heading_level}] {elem.text}")
+        else:
+            print(f"[단락] {elem.text[:50]}...")
+    elif isinstance(elem, Table):
+        print(f"[표] {len(elem.rows)}행")
+    elif isinstance(elem, Image):
+        print(f"[이미지] {elem.alt_text}")
+```
+
+```python Document 변환
+from ureca_document_parser.models import Document, Paragraph
+from ureca_document_parser import get_registry
+
+# Document 객체 생성
+doc = Document(
+    elements=[
+        Paragraph(text="제목", heading_level=1),
+        Paragraph(text="내용입니다.")
+    ]
+)
+
+# Markdown으로 변환
+registry = get_registry()
+markdown = registry.write(doc, "markdown")
+print(markdown)
+# 출력:
+# # 제목
+#
+# 내용입니다.
+```
+
+```python 메타데이터 활용
+from ureca_document_parser import get_registry
+
+registry = get_registry()
+doc = registry.parse("보고서.hwp")
+
+print(f"제목: {doc.metadata.title}")
+print(f"저자: {doc.metadata.author}")
+print(f"포맷: {doc.metadata.source_format}")
+
+if doc.metadata.extra:
+    print("추가 정보:")
+    for key, value in doc.metadata.extra.items():
+        print(f"  {key}: {value}")
+```
+
+</CodeGroup>
+
+## 디자인 원칙
+
+Document 모델은 다음 원칙에 따라 설계되었어요:
+
+<CardGroup cols={2}>
+  <Card title="포맷 독립성" icon="layer-group">
+    특정 입력/출력 포맷에 종속되지 않는 중립적인 표현이예요
+  </Card>
+  
+  <Card title="확장성" icon="puzzle-piece">
+    새로운 요소 타입을 쉽게 추가할 수 있어요
+  </Card>
+  
+  <Card title="불변성" icon="lock">
+    dataclass로 구현되어 안전하게 공유할 수 있어요
+  </Card>
+  
+  <Card title="단순성" icon="feather">
+    복잡한 상속 없이 간단한 데이터 구조만 사용해요
+  </Card>
+</CardGroup>
+
+## 관련 API
+
+<CardGroup cols={2}>
+  <Card title="FormatRegistry" icon="database" href="/api/registry">
+    Parser와 Writer를 등록하고 관리해요
+  </Card>
+  
+  <Card title="convert()" icon="arrows-rotate" href="/api/convert">
+    Document를 생성하고 변환하는 고수준 API예요
+  </Card>
+  
+  <Card title="포맷 확장" icon="code" href="/extending">
+    커스텀 Parser와 Writer를 작성하는 방법이예요
+  </Card>
+</CardGroup>
+
+## 참고사항
+
+<Note>
+모든 모델 클래스는 `dataclass`로 구현되어 있어서 `==` 비교, 복사, 직렬화가 쉬워요.
+</Note>
+
+<Tip>
+복잡한 문서 구조를 다룰 때는 재귀적으로 요소를 순회하는 헬퍼 함수를 작성하면 편리해요. 특히 TableCell이 중첩된 Table을 포함할 수 있다는 점을 고려하세요.
+</Tip>
+
+<Warning>
+`DocumentElement` 타입 별칭은 Python 3.12+의 `type` 문법을 사용해요. 이전 버전에서는 `Union[Paragraph, Table, ...]`으로 표현돼요.
+</Warning>

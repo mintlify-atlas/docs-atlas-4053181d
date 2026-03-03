@@ -1,0 +1,435 @@
+---
+title: "LangChain 연동 가이드"
+description: "ureca_document_parser를 LangChain과 연동해서 RAG 파이프라인을 구축하는 방법을 배워요"
+---
+
+## 개요
+
+`ureca_document_parser`는 [LangChain](https://python.langchain.com/)과 완벽하게 통합되어 RAG(Retrieval-Augmented Generation) 파이프라인 구축에 최적화되어 있어요. HWP/HWPX 문서를 LangChain Document 청크로 자동 변환해서 벡터 스토어에 바로 저장할 수 있어요.
+
+## 설치
+
+LangChain 통합을 사용하려면 `langchain` extra와 함께 설치해야 해요.
+
+```bash
+uv add "ureca_document_parser[langchain]"
+```
+
+또는 pip 사용:
+
+```bash
+pip install "ureca_document_parser[langchain]"
+```
+
+<Info>
+`langchain` extra는 다음 패키지를 포함해요:
+- `langchain-core` - LangChain의 핵심 추상화 (Document 클래스)
+- `langchain-text-splitters` - 텍스트 청킹 도구 (RecursiveCharacterTextSplitter)
+</Info>
+
+## 기본 사용법
+
+### LangChain Document로 변환
+
+`chunks=True` 파라미터를 사용하면 LangChain `Document` 청크 리스트를 반환받아요.
+
+```python
+from ureca_document_parser import convert
+
+# HWP를 LangChain Document 청크로 변환
+chunks = convert("보고서.hwp", chunks=True)
+
+for i, chunk in enumerate(chunks):
+    print(f"청크 {i+1}:")
+    print(f"  내용: {chunk.page_content[:100]}...")
+    print(f"  메타데이터: {chunk.metadata}")
+```
+
+### 청크 크기 조정
+
+`chunk_size`와 `chunk_overlap` 파라미터로 청크 크기를 조정할 수 있어요.
+
+```python
+from ureca_document_parser import convert
+
+# 작은 청크 (500자, 오버랩 100자)
+small_chunks = convert(
+    "보고서.hwp",
+    chunks=True,
+    chunk_size=500,
+    chunk_overlap=100
+)
+
+# 큰 청크 (2000자, 오버랩 400자)
+large_chunks = convert(
+    "보고서.hwp",
+    chunks=True,
+    chunk_size=2000,
+    chunk_overlap=400
+)
+
+print(f"작은 청크 개수: {len(small_chunks)}")
+print(f"큰 청크 개수: {len(large_chunks)}")
+```
+
+<Note>
+기본값은 `chunk_size=1000`, `chunk_overlap=200`이에요. 이 값은 대부분의 사용 사례에 적합해요.
+</Note>
+
+## RAG 파이프라인 구축
+
+### 벡터 스토어에 저장
+
+LangChain의 벡터 스토어에 바로 저장할 수 있어요.
+
+<CodeGroup>
+
+```python Chroma
+from ureca_document_parser import convert
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+
+# 문서를 청크로 변환
+chunks = convert("보고서.hwp", chunks=True)
+
+# 임베딩 생성 및 벡터 스토어에 저장
+embeddings = OpenAIEmbeddings()
+vectorstore = Chroma.from_documents(
+    documents=chunks,
+    embedding=embeddings,
+    persist_directory="./chroma_db"
+)
+
+# 검색
+results = vectorstore.similarity_search("프로젝트 예산은?", k=3)
+for result in results:
+    print(result.page_content)
+```
+
+```python FAISS
+from ureca_document_parser import convert
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
+
+# 문서를 청크로 변환
+chunks = convert("보고서.hwp", chunks=True)
+
+# FAISS 벡터 스토어 생성
+embeddings = OpenAIEmbeddings()
+vectorstore = FAISS.from_documents(
+    documents=chunks,
+    embedding=embeddings
+)
+
+# 로컬에 저장
+vectorstore.save_local("./faiss_index")
+
+# 불러오기
+vectorstore = FAISS.load_local(
+    "./faiss_index",
+    embeddings,
+    allow_dangerous_deserialization=True
+)
+```
+
+```python Pinecone
+from ureca_document_parser import convert
+from langchain_openai import OpenAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
+import os
+
+# 문서를 청크로 변환
+chunks = convert("보고서.hwp", chunks=True)
+
+# Pinecone 벡터 스토어에 저장
+embeddings = OpenAIEmbeddings()
+vectorstore = PineconeVectorStore.from_documents(
+    documents=chunks,
+    embedding=embeddings,
+    index_name="hwp-documents"
+)
+```
+
+</CodeGroup>
+
+### 여러 문서 처리
+
+여러 HWP/HWPX 파일을 한 번에 처리해서 벡터 스토어에 저장할 수 있어요.
+
+```python
+from pathlib import Path
+from ureca_document_parser import convert
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+
+# 모든 HWP/HWPX 파일 찾기
+input_dir = Path("documents")
+files = list(input_dir.glob("*.hwp")) + list(input_dir.glob("*.hwpx"))
+
+# 모든 청크 수집
+all_chunks = []
+for file in files:
+    chunks = convert(file, chunks=True)
+    all_chunks.extend(chunks)
+    print(f"{file.name}: {len(chunks)}개 청크")
+
+print(f"\n총 {len(all_chunks)}개 청크")
+
+# 벡터 스토어에 저장
+embeddings = OpenAIEmbeddings()
+vectorstore = Chroma.from_documents(
+    documents=all_chunks,
+    embedding=embeddings
+)
+```
+
+### 리트리버 생성
+
+벡터 스토어에서 리트리버를 생성해서 질의응답에 사용할 수 있어요.
+
+```python
+from ureca_document_parser import convert
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_chroma import Chroma
+from langchain.chains import RetrievalQA
+
+# 문서 변환 및 벡터 스토어 생성
+chunks = convert("보고서.hwp", chunks=True)
+embeddings = OpenAIEmbeddings()
+vectorstore = Chroma.from_documents(chunks, embeddings)
+
+# 리트리버 생성
+retriever = vectorstore.as_retriever(
+    search_type="similarity",
+    search_kwargs={"k": 3}
+)
+
+# QA 체인 생성
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    chain_type="stuff",
+    retriever=retriever,
+    return_source_documents=True
+)
+
+# 질의응답
+result = qa_chain.invoke({"query": "프로젝트의 주요 목표는 무엇인가요?"})
+print(f"답변: {result['result']}")
+print(f"\n출처: {len(result['source_documents'])}개 문서")
+```
+
+## 메타데이터
+
+LangChain Document의 메타데이터에는 다음 정보가 자동으로 포함돼요:
+
+```python
+from ureca_document_parser import convert
+
+chunks = convert("보고서.hwp", chunks=True)
+print(chunks[0].metadata)
+```
+
+**출력:**
+```python
+{
+    'source': '보고서.hwp',
+    'format': 'hwp'  # 또는 'hwpx'
+}
+```
+
+### 커스텀 메타데이터 추가
+
+메타데이터를 추가로 설정할 수 있어요.
+
+```python
+from ureca_document_parser import convert
+
+chunks = convert("보고서.hwp", chunks=True)
+
+# 모든 청크에 메타데이터 추가
+for chunk in chunks:
+    chunk.metadata["author"] = "홍길동"
+    chunk.metadata["department"] = "개발팀"
+    chunk.metadata["year"] = 2024
+
+print(chunks[0].metadata)
+# {'source': '보고서.hwp', 'format': 'hwp', 'author': '홍길동', 'department': '개발팀', 'year': 2024}
+```
+
+## 내부 동작
+
+`chunks=True`로 호출하면 다음과 같은 과정을 거쳐요:
+
+<Steps>
+  <Step title="문서 파싱">
+    HWP/HWPX 파일을 `Document` 모델로 파싱해요.
+  </Step>
+  
+  <Step title="Markdown 변환">
+    `Document` 모델을 Markdown 문자열로 변환해요.
+  </Step>
+  
+  <Step title="텍스트 분할">
+    LangChain의 `RecursiveCharacterTextSplitter`로 텍스트를 청크로 나눠요.
+  </Step>
+  
+  <Step title="메타데이터 추가">
+    각 청크에 `source`와 `format` 메타데이터를 추가해요.
+  </Step>
+  
+  <Step title="Document 리스트 반환">
+    LangChain `Document` 객체의 리스트를 반환해요.
+  </Step>
+</Steps>
+
+소스 코드 (`src/ureca_document_parser/__init__.py:81-104`):
+
+```python
+if chunks:
+    # LangChain 청크로 반환
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+    except ImportError:
+        raise ImportError(
+            "chunks=True requires the langchain extra. "
+            "Install it with: pip install ureca_document_parser[langchain]"
+        ) from None
+
+    md = registry.write(doc, format)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    return splitter.create_documents(
+        [md],
+        metadatas=[
+            {
+                "source": str(input_path),
+                "format": doc.metadata.source_format,
+            }
+        ],
+    )
+```
+
+## 실전 예제
+
+### 전체 RAG 파이프라인
+
+완전한 RAG 파이프라인 예제예요.
+
+```python
+from pathlib import Path
+from ureca_document_parser import convert
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_chroma import Chroma
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
+
+# 1. 문서 변환
+print("문서 변환 중...")
+input_dir = Path("documents")
+all_chunks = []
+
+for file in input_dir.glob("*.hwp"):
+    chunks = convert(file, chunks=True, chunk_size=1000)
+    all_chunks.extend(chunks)
+    print(f"  {file.name}: {len(chunks)}개 청크")
+
+print(f"\n총 {len(all_chunks)}개 청크 생성")
+
+# 2. 벡터 스토어 생성
+print("\n벡터 스토어 생성 중...")
+embeddings = OpenAIEmbeddings()
+vectorstore = Chroma.from_documents(
+    documents=all_chunks,
+    embedding=embeddings,
+    persist_directory="./chroma_db"
+)
+
+# 3. 대화형 QA 체인 생성
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+memory = ConversationBufferMemory(
+    memory_key="chat_history",
+    return_messages=True,
+    output_key="answer"
+)
+
+qa_chain = ConversationalRetrievalChain.from_llm(
+    llm=llm,
+    retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
+    memory=memory,
+    return_source_documents=True
+)
+
+# 4. 대화형 질의응답
+print("\n질의응답 시작 (종료: 'quit')")
+while True:
+    query = input("\n질문: ")
+    if query.lower() in ["quit", "exit", "종료"]:
+        break
+    
+    result = qa_chain.invoke({"question": query})
+    print(f"\n답변: {result['answer']}")
+    print(f"출처: {len(result['source_documents'])}개 문서 참조")
+```
+
+### 메타데이터 필터링
+
+메타데이터를 사용해서 검색을 필터링할 수 있어요.
+
+```python
+from ureca_document_parser import convert
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+
+# 여러 문서 변환 및 메타데이터 추가
+docs_metadata = [
+    ("2023년보고서.hwp", {"year": 2023, "type": "연간보고서"}),
+    ("2024년보고서.hwp", {"year": 2024, "type": "연간보고서"}),
+    ("제안서.hwp", {"year": 2024, "type": "제안서"}),
+]
+
+all_chunks = []
+for filename, metadata in docs_metadata:
+    chunks = convert(filename, chunks=True)
+    for chunk in chunks:
+        chunk.metadata.update(metadata)
+    all_chunks.extend(chunks)
+
+# 벡터 스토어 생성
+embeddings = OpenAIEmbeddings()
+vectorstore = Chroma.from_documents(all_chunks, embeddings)
+
+# 2024년 문서만 검색
+retriever = vectorstore.as_retriever(
+    search_kwargs={
+        "k": 3,
+        "filter": {"year": 2024}
+    }
+)
+
+results = retriever.invoke("주요 성과는?")
+for result in results:
+    print(f"{result.metadata['year']}년 {result.metadata['type']}")
+    print(result.page_content[:200])
+    print("---")
+```
+
+## 다음 단계
+
+<CardGroup cols={2}>
+
+<Card title="Python API" icon="python" href="/guides/python-api">
+  기본적인 Python API 사용법을 알아보세요
+</Card>
+
+<Card title="고급 사용법" icon="code" href="/guides/advanced">
+  Document 모델을 직접 다루는 방법을 알아보세요
+</Card>
+
+<Card title="LangChain 문서" icon="book" href="https://python.langchain.com/docs/get_started/introduction">
+  LangChain 공식 문서를 확인하세요
+</Card>
+
+</CardGroup>

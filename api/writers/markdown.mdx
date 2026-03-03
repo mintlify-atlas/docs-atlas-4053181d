@@ -1,0 +1,438 @@
+---
+title: 'MarkdownWriter'
+description: 'Document를 Markdown 형식으로 변환하는 Writer 구현체예요'
+---
+
+## 개요
+
+`MarkdownWriter`는 `Writer` 프로토콜을 구현하여 `Document` 모델을 표준 Markdown 형식으로 변환해요. 제목, 표, 목록, 이미지, 링크 등 모든 문서 요소를 지원하며, 중첩된 표는 HTML 테이블로 자동 변환돼요.
+
+## Writer Protocol
+
+`MarkdownWriter`는 다음 `Writer` 프로토콜 시그니처를 구현해요:
+
+```python
+class Writer(Protocol):
+    @staticmethod
+    def format_name() -> str:
+        """출력 포맷 이름, 예: 'markdown'"""
+        ...
+
+    @staticmethod
+    def file_extension() -> str:
+        """출력 파일 확장자, 예: '.md'"""
+        ...
+
+    @staticmethod
+    def write(doc: Document) -> str:
+        """Document를 출력 포맷 문자열로 변환"""
+        ...
+```
+
+## 클래스 메서드
+
+### `format_name()`
+
+포맷 이름을 반환해요.
+
+```python
+@staticmethod
+def format_name() -> str:
+    return "markdown"
+```
+
+**반환값**
+- `str`: 포맷 이름 (`"markdown"`)
+
+### `file_extension()`
+
+파일 확장자를 반환해요.
+
+```python
+@staticmethod
+def file_extension() -> str:
+    return ".md"
+```
+
+**반환값**
+- `str`: 파일 확장자 (`".md"`)
+
+### `write(doc)`
+
+`Document` 객체를 Markdown 문자열로 변환해요.
+
+```python
+@staticmethod
+def write(doc: Document) -> str:
+    return to_markdown(doc)
+```
+
+**매개변수**
+- `doc` (`Document`): 변환할 문서 객체
+
+**반환값**
+- `str`: Markdown 형식 문자열
+
+## 요소별 변환 규칙
+
+### 제목 (Headings)
+
+`Paragraph`의 `heading_level` 속성에 따라 Markdown 제목으로 변환돼요.
+
+```python
+from ureca_document_parser import Document, Paragraph
+from ureca_document_parser.writers.markdown import MarkdownWriter
+
+doc = Document(elements=[
+    Paragraph(text="문서 제목", heading_level=1),
+    Paragraph(text="소제목", heading_level=2),
+    Paragraph(text="일반 텍스트", heading_level=0),
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+# 문서 제목
+
+## 소제목
+
+일반 텍스트
+```
+
+### 표 (Tables)
+
+`Table` 객체는 Markdown 파이프 테이블로 변환돼요. 첫 번째 행은 자동으로 헤더로 처리돼요.
+
+```python
+from ureca_document_parser import Document, Table, TableRow, TableCell, Paragraph
+
+doc = Document(elements=[
+    Table(rows=[
+        TableRow(cells=[
+            TableCell(content=[Paragraph(text="이름")]),
+            TableCell(content=[Paragraph(text="나이")]),
+        ]),
+        TableRow(cells=[
+            TableCell(content=[Paragraph(text="홍길동")]),
+            TableCell(content=[Paragraph(text="30")]),
+        ]),
+    ])
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+| 이름   | 나이 |
+| ------ | ---- |
+| 홍길동 | 30   |
+```
+
+#### 중첩 테이블 처리
+
+셀 안에 다른 `Table`이 포함된 경우 HTML `<table>` 태그로 변환돼요.
+
+```python
+nested_table = Table(rows=[
+    TableRow(cells=[TableCell(content=[Paragraph(text="A")])]),
+])
+
+doc = Document(elements=[
+    Table(rows=[
+        TableRow(cells=[
+            TableCell(content=[Paragraph(text="외부")]),
+            TableCell(content=[nested_table]),
+        ]),
+    ])
+])
+
+markdown = MarkdownWriter.write(doc)
+# 중첩 테이블은 <table><tr><td>A</td></tr></table> 형태로 변환돼요
+```
+
+#### 특수 문자 이스케이프
+
+셀 내용에 파이프(`|`) 문자가 있으면 자동으로 이스케이프(`\|`)돼요.
+
+```python
+doc = Document(elements=[
+    Table(rows=[
+        TableRow(cells=[
+            TableCell(content=[Paragraph(text="A|B")]),
+        ]),
+    ])
+])
+
+markdown = MarkdownWriter.write(doc)
+# 출력: | A\|B |
+```
+
+### 목록 (Lists)
+
+연속된 `ListItem` 요소는 하나의 목록 블록으로 그룹화돼요.
+
+#### 순서 없는 목록
+
+```python
+from ureca_document_parser import Document, ListItem
+
+doc = Document(elements=[
+    ListItem(text="첫 번째 항목", ordered=False),
+    ListItem(text="두 번째 항목", ordered=False),
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+- 첫 번째 항목
+- 두 번째 항목
+```
+
+#### 순서 있는 목록
+
+```python
+doc = Document(elements=[
+    ListItem(text="첫째", ordered=True),
+    ListItem(text="둘째", ordered=True),
+    ListItem(text="셋째", ordered=True),
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+1. 첫째
+2. 둘째
+3. 셋째
+```
+
+#### 중첩 목록
+
+`level` 속성으로 들여쓰기 수준을 지정할 수 있어요.
+
+```python
+doc = Document(elements=[
+    ListItem(text="상위 항목", level=0, ordered=False),
+    ListItem(text="하위 항목", level=1, ordered=False),
+    ListItem(text="더 하위 항목", level=2, ordered=False),
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+- 상위 항목
+  - 하위 항목
+    - 더 하위 항목
+```
+
+### 이미지 (Images)
+
+`Image` 객체는 Markdown 이미지 문법으로 변환돼요.
+
+```python
+from ureca_document_parser import Document, Image
+
+doc = Document(elements=[
+    Image(alt_text="로고", source="logo.png"),
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+![로고](logo.png)
+```
+
+`alt_text`가 없으면 기본값 `"image"`가 사용돼요.
+
+```python
+doc = Document(elements=[
+    Image(source="photo.jpg"),
+])
+
+markdown = MarkdownWriter.write(doc)
+# 출력: ![image](photo.jpg)
+```
+
+### 링크 (Links)
+
+`Link` 객체는 Markdown 링크 문법으로 변환돼요.
+
+```python
+from ureca_document_parser import Document, Link
+
+doc = Document(elements=[
+    Link(text="공식 문서", url="https://example.com/docs"),
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+[공식 문서](https://example.com/docs)
+```
+
+### 구분선 (Horizontal Rule)
+
+`HorizontalRule` 객체는 `---`로 변환돼요.
+
+```python
+from ureca_document_parser import Document, HorizontalRule
+
+doc = Document(elements=[
+    HorizontalRule(),
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+---
+```
+
+## 실전 예제
+
+### 전체 문서 변환
+
+```python
+from ureca_document_parser import (
+    Document,
+    Paragraph,
+    Table,
+    TableRow,
+    TableCell,
+    ListItem,
+    Image,
+    Link,
+    HorizontalRule,
+)
+from ureca_document_parser.writers.markdown import MarkdownWriter
+
+doc = Document(elements=[
+    Paragraph(text="프로젝트 보고서", heading_level=1),
+    Paragraph(text="개요", heading_level=2),
+    Paragraph(text="이 문서는 프로젝트 진행 상황을 요약합니다."),
+    
+    Paragraph(text="주요 기능", heading_level=2),
+    ListItem(text="문서 파싱", ordered=False),
+    ListItem(text="Markdown 변환", ordered=False),
+    ListItem(text="LangChain 연동", ordered=False),
+    
+    HorizontalRule(),
+    
+    Paragraph(text="팀 구성", heading_level=2),
+    Table(rows=[
+        TableRow(cells=[
+            TableCell(content=[Paragraph(text="이름")]),
+            TableCell(content=[Paragraph(text="역할")]),
+        ]),
+        TableRow(cells=[
+            TableCell(content=[Paragraph(text="홍길동")]),
+            TableCell(content=[Paragraph(text="개발자")]),
+        ]),
+    ]),
+    
+    Paragraph(text="참고 자료", heading_level=2),
+    Link(text="GitHub 저장소", url="https://github.com/example/project"),
+])
+
+markdown = MarkdownWriter.write(doc)
+print(markdown)
+```
+
+**출력**
+```markdown
+# 프로젝트 보고서
+
+## 개요
+
+이 문서는 프로젝트 진행 상황을 요약합니다.
+
+## 주요 기능
+
+- 문서 파싱
+- Markdown 변환
+- LangChain 연동
+
+---
+
+## 팀 구성
+
+| 이름   | 역할   |
+| ------ | ------ |
+| 홍길동 | 개발자 |
+
+## 참고 자료
+
+[GitHub 저장소](https://github.com/example/project)
+```
+
+### CLI에서 사용
+
+```bash
+uv run ureca_document_parser 보고서.hwp -o 보고서.md
+```
+
+### Python API에서 사용
+
+```python
+from ureca_document_parser import convert
+
+convert("제안서.hwpx", "제안서.md")
+```
+
+## 내부 함수
+
+`MarkdownWriter.write()` 메서드는 내부적으로 `to_markdown()` 함수를 호출해요. 직접 `to_markdown()`을 사용할 수도 있어요:
+
+```python
+from ureca_document_parser.writers.markdown import to_markdown
+from ureca_document_parser import Document, Paragraph
+
+doc = Document(elements=[
+    Paragraph(text="Hello", heading_level=1),
+])
+
+markdown = to_markdown(doc)
+print(markdown)
+# 출력: # Hello
+```
+
+### 헬퍼 함수들
+
+`markdown.py` 모듈은 다음 내부 헬퍼 함수들을 제공해요:
+
+- `_render_paragraph(para)`: `Paragraph`를 Markdown으로 렌더링
+- `_render_table(table)`: `Table`을 파이프 테이블로 렌더링
+- `_render_list_item(item, counter)`: `ListItem`을 렌더링
+- `_render_image(image)`: `Image`를 렌더링
+- `_render_link(link)`: `Link`를 렌더링
+- `_render_cell_content(cell)`: 테이블 셀 내용을 렌더링
+- `_render_nested_table_html(table)`: 중첩 테이블을 HTML로 렌더링
+
+이 함수들은 모듈 내부용이므로 직접 호출하기보다는 `to_markdown()` 또는 `MarkdownWriter.write()`를 사용하는 것을 권장해요.
+
+## 관련 문서
+
+- [Writer Protocol](/api/protocols#writer) - Writer 프로토콜 사양
+- [Document 모델](/api/models) - Document 및 DocumentElement 구조
+- [Python API 가이드](/guides/python-api) - 전체 API 사용법

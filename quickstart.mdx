@@ -1,80 +1,196 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: 빠른 시작
+description: 5분 안에 첫 HWP 문서를 Markdown으로 변환해보세요
 ---
 
-## Get started in three steps
+이 가이드에서는 Ureca Document Parser를 사용해서 첫 HWP 문서를 Markdown으로 변환하는 방법을 알아볼 거예요.
 
-Get your documentation site running locally and make your first customization.
+## 시작하기 전에
 
-### Step 1: Set up your local environment
+Ureca Document Parser가 설치되어 있는지 확인하세요. 아직 설치하지 않았다면 [설치 가이드](/installation)를 먼저 확인해주세요.
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+<Steps>
 
-### Step 2: Deploy your changes
+<Step title="변환할 문서 준비">
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+변환하려는 HWP 또는 HWPX 파일을 준비하세요. 예제에서는 `보고서.hwp`라는 파일을 사용할게요.
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Tip>
+  테스트용 HWP 파일이 없다면, 한컴오피스에서 간단한 문서를 만들어서 저장하거나, 기존 문서를 사용해보세요.
+</Tip>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+</Step>
 
-### Step 3: Go live
+<Step title="Python에서 변환하기">
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+가장 간단한 방법은 `convert` 함수를 사용하는 거예요:
 
-## Next steps
+```python
+from ureca_document_parser import convert
 
-Now that you have your docs running, explore these key features:
+# 파일로 저장
+convert("보고서.hwp", "보고서.md")
+```
 
-<CardGroup cols={2}>
+이 코드는 `보고서.hwp` 파일을 읽어서 Markdown으로 변환한 후, `보고서.md` 파일로 저장해요.
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+</Step>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+<Step title="결과 확인">
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+변환이 완료되면 같은 디렉토리에 `보고서.md` 파일이 생성돼요. 이 파일을 텍스트 에디터나 Markdown 뷰어로 열어서 확인해보세요.
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+</Step>
 
-</CardGroup>
+</Steps>
+
+## 다양한 사용 방법
+
+### 문자열로 반환받기
+
+파일로 저장하지 않고 Markdown 문자열을 직접 받고 싶다면, `output_path` 인자를 생략하세요:
+
+```python
+from ureca_document_parser import convert
+
+markdown = convert("보고서.hwp")
+print(markdown)
+```
+
+이렇게 하면 변환된 Markdown이 문자열로 반환돼요. 이 방법은 변환 결과를 추가로 처리하거나 다른 시스템에 전달할 때 유용해요.
+
+### CLI로 변환하기
+
+커맨드라인에서 바로 변환하고 싶다면 CLI 도구를 사용하세요:
+
+```bash
+ureca_document_parser 보고서.hwp -o 보고서.md
+```
+
+변환이 완료되면 다음과 같은 메시지가 출력돼요:
+
+```
+변환 완료: 보고서.md
+```
+
+<Tip>
+  표준 출력으로 바로 확인하고 싶다면 `-o` 옵션을 생략하세요:
+  ```bash
+  ureca_document_parser 보고서.hwp
+  ```
+</Tip>
+
+### 여러 파일 일괄 변환
+
+여러 HWP 파일을 한 번에 변환하려면 셸 반복문을 사용할 수 있어요:
+
+```bash
+for file in *.hwp; do
+    ureca_document_parser "$file" -o "${file%.hwp}.md"
+done
+```
+
+이 명령은 현재 디렉토리의 모든 `.hwp` 파일을 찾아서 같은 이름의 `.md` 파일로 변환해요.
+
+## LangChain과 함께 사용하기
+
+RAG 파이프라인을 구축하려면 문서를 청크로 분할해야 해요. `chunks=True` 옵션을 사용하면 간단하게 할 수 있어요:
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  이 기능을 사용하려면 `langchain` extra를 설치해야 해요:
+  ```bash
+  uv add "ureca_document_parser[langchain]"
+  ```
 </Note>
+
+```python
+from ureca_document_parser import convert
+
+# LangChain Document 청크로 반환
+chunks = convert(
+    "보고서.hwp",
+    chunks=True,
+    chunk_size=1000,
+    chunk_overlap=200
+)
+
+# 각 청크 확인
+for i, chunk in enumerate(chunks):
+    print(f"청크 {i + 1}:")
+    print(chunk.page_content)
+    print(f"메타데이터: {chunk.metadata}")
+    print("-" * 50)
+```
+
+### 벡터 스토어에 저장하기
+
+변환된 청크를 바로 벡터 스토어에 저장할 수 있어요:
+
+```python
+from ureca_document_parser import convert
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+
+# 문서를 청크로 변환
+chunks = convert("보고서.hwp", chunks=True)
+
+# 벡터 스토어에 저장
+embeddings = OpenAIEmbeddings()
+vectorstore = Chroma.from_documents(
+    documents=chunks,
+    embedding=embeddings
+)
+
+# 검색
+results = vectorstore.similarity_search("프로젝트 일정은?", k=3)
+for result in results:
+    print(result.page_content)
+```
+
+## 오류 처리
+
+파일이 손상되었거나 지원하지 않는 포맷인 경우 `ParseError` 예외가 발생해요:
+
+```python
+from ureca_document_parser import convert, ParseError
+
+try:
+    convert("손상된문서.hwp", "출력.md")
+except ParseError as e:
+    print(f"파싱 오류: {e}")
+except FileNotFoundError:
+    print("파일을 찾을 수 없습니다")
+```
+
+## 다음 단계
+
+<CardGroup cols={2}>
+  <Card
+    title="Python API 가이드"
+    icon="code"
+    href="/guides/python-api"
+  >
+    다양한 변환 옵션과 고급 사용법을 알아보세요
+  </Card>
+  <Card
+    title="LangChain 연동"
+    icon="link"
+    href="/guides/langchain"
+  >
+    RAG 파이프라인 구축 방법을 자세히 알아보세요
+  </Card>
+  <Card
+    title="CLI 가이드"
+    icon="terminal"
+    href="/guides/cli"
+  >
+    커맨드라인에서 사용하는 모든 옵션을 확인하세요
+  </Card>
+  <Card
+    title="API 레퍼런스"
+    icon="book"
+    href="/api/convert"
+  >
+    전체 API 문서를 확인하세요
+  </Card>
+</CardGroup>

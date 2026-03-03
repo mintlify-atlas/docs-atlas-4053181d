@@ -1,0 +1,288 @@
+---
+title: "HWPX 포맷"
+description: "아래한글 XML 포맷 (HWPX 2014+) 파서 가이드"
+---
+
+## 개요
+
+HWPX는 한컴오피스 2014 버전부터 도입된 XML 기반 오픈 문서 포맷이에요. `.hwpx` 확장자를 사용하며, HWP 바이너리 포맷에 비해 구조가 단순하고 표준 도구로 다루기 쉬워요.
+
+### 기술 스펙
+
+- **파일 구조**: ZIP 아카이브 기반 Open Packaging Convention (OPC)
+- **문서 형식**: XML
+- **지원 버전**: 한컴오피스 2014 이상에서 생성된 HWPX
+- **인코딩**: UTF-8 (XML 기본)
+
+<Note>
+  HWPX는 국제 표준을 따르는 포맷이지만, 한국어 문서에 특화된 요소들이 포함되어 있어요.
+</Note>
+
+## 파일 구조
+
+HWPX 파일은 내부적으로 ZIP 압축된 XML 파일들의 모음이에요:
+
+```
+HWPX File (ZIP Archive)
+├── Contents/
+│   ├── content.hpf      # 매니페스트 (섹션 순서 정의)
+│   ├── section0.xml     # 첫 번째 섹션
+│   ├── section1.xml     # 두 번째 섹션
+│   └── ...
+├── docInfo.xml          # 문서 메타데이터
+└── version.xml          # HWPX 버전 정보
+```
+
+### XML 구조 예시
+
+```xml
+<!-- section0.xml -->
+<p styleIDRef="Heading1">
+  <run>
+    <t>제목 텍스트</t>
+  </run>
+</p>
+
+<tbl>
+  <tr>
+    <tc>
+      <p><run><t>셀 내용</t></run></p>
+    </tc>
+  </tr>
+</tbl>
+```
+
+### 파싱 파이프라인
+
+HWPX 파서는 다음 단계로 동작해요:
+
+1. **ZIP 아카이브 열기** — 표준 `zipfile` 모듈 사용
+2. **섹션 파일 탐색** (`src/ureca_document_parser/hwpx/parser.py:51`)
+   - `content.hpf` 매니페스트에서 섹션 순서 읽기
+   - 폴백: 파일명 패턴 기반 탐색 (`section*.xml`)
+3. **XML 파싱** — 각 섹션 XML을 `xml.etree.ElementTree`로 파싱
+4. **요소 추출** (`src/ureca_document_parser/hwpx/parser.py:95`)
+   - `<p>` → Paragraph
+   - `<tbl>` → Table
+   - 중첩 구조 재귀 처리
+5. **제목 레벨 감지** — `outlineLevel` 속성 및 스타일 패턴 매칭
+6. **Document 모델 생성**
+
+## 사용 예시
+
+### 기본 변환
+
+```python
+from ureca_document_parser import convert
+
+# HWPX → Markdown 변환
+convert("제안서.hwpx", "제안서.md")
+```
+
+### Document 모델 직접 다루기
+
+```python
+from ureca_document_parser.hwpx import HwpxParser
+
+# Document 객체 얻기
+doc = HwpxParser.parse("계약서.hwpx")
+
+# 메타데이터 확인
+print(f"포맷: {doc.metadata.source_format}")  # "hwpx"
+
+# 요소 순회
+for element in doc.elements:
+    if isinstance(element, Paragraph):
+        if element.heading_level > 0:
+            print(f"H{element.heading_level}: {element.text}")
+```
+
+### CLI 사용
+
+```bash
+# HWPX 파일 변환
+uv run ureca_document_parser 기획안.hwpx -o 기획안.md
+
+# 표준 출력으로
+uv run ureca_document_parser 기획안.hwpx
+```
+
+## 지원 기능
+
+### 텍스트 추출
+
+- **문단 (`<p>`)** — 일반 문단 텍스트
+- **Run (`<run>`)** — 텍스트 런 단위 처리
+- **텍스트 노드 (`<t>`)** — 실제 텍스트 컨텐츠
+
+HWPX는 텍스트를 `<p>` → `<run>` → `<t>` 계층으로 저장해요. 일부 변형에서는 `<p>` 직계 자식으로 `<t>`가 나타날 수도 있어요 (`src/ureca_document_parser/hwpx/parser.py:136`).
+
+### 제목 감지
+
+제목 레벨은 두 가지 방법으로 감지해요:
+
+1. **outlineLevel 속성** (`src/ureca_document_parser/hwpx/parser.py:152`)
+   ```xml
+   <p>
+     <pPr outlineLevel="1" />
+     <run><t>제목</t></run>
+   </p>
+   ```
+
+2. **스타일 ID 패턴 매칭** (`src/ureca_document_parser/hwpx/parser.py:167`)
+   - `"heading1"`, `"제목 1"` → H1
+   - `"heading2"`, `"제목 2"` → H2
+   - 기타 제목 스타일 (`src/ureca_document_parser/styles.py`에서 공유)
+
+### 표 (Table) 파싱
+
+HWPX 표는 직관적인 XML 구조를 가져요:
+
+```xml
+<tbl>
+  <tr>  <!-- 행 -->
+    <tc>  <!-- 셀 -->
+      <p><run><t>A1</t></run></p>
+    </tc>
+    <tc>
+      <p><run><t>B1</t></run></p>
+    </tc>
+  </tr>
+</tbl>
+```
+
+#### 중첩 테이블 지원
+
+셀 내부에 다른 표가 포함된 중첩 구조도 재귀적으로 파싱해요 (`src/ureca_document_parser/hwpx/parser.py:193`):
+
+```python
+def _parse_table_cell(tc_elem):
+    cell = TableCell()
+    for child in tc_elem:
+        if _strip_ns(child.tag) == "tbl":
+            nested = _parse_table_element(child)
+            cell.content.append(nested)
+    return cell
+```
+
+### 네임스페이스 처리
+
+HWPX XML은 다양한 네임스페이스를 사용할 수 있어요. 파서는 네임스페이스에 무관하게 로컬 태그명만 매칭해요 (`src/ureca_document_parser/hwpx/parser.py:33`):
+
+```python
+def _strip_ns(tag: str) -> str:
+    """'{namespace}localname' → 'localname'"""
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+```
+
+## 제한사항
+
+<Warning>
+  다음 기능은 현재 버전에서 지원하지 않아요:
+</Warning>
+
+- **이미지 및 미디어** — 임베디드 이미지는 무시돼요
+- **도형 및 그리기 객체** — 벡터 그래픽은 추출하지 않아요
+- **머리글/바닥글** — 본문 섹션만 파싱해요
+- **각주/미주** — 주석 컨텐츠는 무시돼요
+- **복잡한 텍스트 서식** — 볼드, 이탤릭 등 서식은 무시되고 플레인 텍스트만 추출돼요
+- **문자 스타일** — 색상, 폰트 정보는 보존되지 않아요
+
+### HWP vs HWPX 차이점
+
+| 기능 | HWP (바이너리) | HWPX (XML) |
+|------|----------------|------------|
+| 구조 복잡도 | 높음 (OLE2 + 바이너리 레코드) | 낮음 (ZIP + XML) |
+| 파싱 성능 | 느림 | 빠름 |
+| 표준 도구 호환 | 낮음 | 높음 (ZIP, XML) |
+| 한컴오피스 버전 | v5.0+ | 2014+ |
+| 제목 감지 정확도 | 중간 (스타일 테이블 의존) | 높음 (outlineLevel 속성) |
+
+<Tip>
+  가능하면 HWPX 포맷으로 저장하여 사용하는 것을 권장해요. 파싱 속도가 빠르고 제목 감지가 더 정확해요.
+</Tip>
+
+## 의존성
+
+HWPX 파서는 Python 표준 라이브러리만 사용해요:
+
+- `zipfile` — ZIP 아카이브 처리
+- `xml.etree.ElementTree` — XML 파싱
+
+추가 설치 없이 바로 사용 가능해요:
+
+```bash
+uv add ureca_document_parser
+```
+
+## 문제 해결
+
+### "유효한 HWPX 파일이 아닙니다" 오류
+
+**원인**: 파일이 ZIP 포맷이 아니거나 손상된 경우
+
+**해결**:
+1. 파일 확장자가 `.hwpx`인지 확인
+2. 한컴오피스에서 "다른 이름으로 저장" → "HWPX 포맷" 선택
+3. 압축 해제 도구로 파일 구조 확인:
+   ```bash
+   unzip -l 파일.hwpx
+   ```
+
+### 섹션이 순서대로 파싱되지 않는 경우
+
+**원인**: `content.hpf` 매니페스트 파일 누락 또는 손상
+
+**해결**:
+- 파서는 자동으로 파일명 패턴 기반 폴백을 사용해요 (`section0.xml`, `section1.xml`, ...)
+- 대부분의 경우 자동 복구되지만, 섹션 순서가 중요한 경우 한컴오피스에서 재저장 권장
+
+### 일부 텍스트가 누락되는 경우
+
+**원인**: 비표준 XML 구조 또는 `<subList>` 요소 사용
+
+**해결**:
+- `<subList>` 요소는 파서에서 지원해요 (`src/ureca_document_parser/hwpx/parser.py:213`)
+- 여전히 누락되는 경우 [이슈 리포트](https://github.com/ureca-corp/document_parser/issues) 부탁드려요
+
+### XML 네임스페이스 오류
+
+**원인**: 다양한 HWPX 생성기가 서로 다른 네임스페이스를 사용
+
+**해결**:
+- 파서는 네임스페이스에 무관하게 로컬 태그명만 매칭해요
+- 자동으로 처리되므로 별도 조치 불필요
+
+## HWP 포맷과의 비교
+
+### 언제 HWPX를 사용해야 할까요?
+
+**HWPX 사용 권장**:
+- ✅ 새로 작성하는 문서
+- ✅ 빠른 파싱 속도가 필요한 경우
+- ✅ 표준 도구로 문서 구조를 분석해야 하는 경우
+- ✅ 제목 레벨 감지가 중요한 경우
+
+**HWP 사용 필요**:
+- ✅ 기존 레거시 문서 (변환 불가능한 경우)
+- ✅ 외부에서 받은 HWP 파일
+- ✅ HWPX 변환 시 호환성 문제가 있는 경우
+
+### 변환 가이드
+
+한컴오피스에서 HWP를 HWPX로 변환하는 방법:
+
+1. HWP 파일 열기
+2. 파일 → 다른 이름으로 저장
+3. 파일 형식: **"HWPX (*.hwpx)"** 선택
+4. 저장
+
+<Note>
+  일부 고급 기능(매크로, 특수 객체)은 HWPX 변환 시 손실될 수 있어요. 변환 후 문서를 확인하세요.
+</Note>
+
+## 참고 자료
+
+- [Open Packaging Convention](https://en.wikipedia.org/wiki/Open_Packaging_Conventions) — OPC 표준
+- [소스 코드](https://github.com/ureca-corp/document_parser/tree/main/src/ureca_document_parser/hwpx) — HWPX 파서 구현
+- [한컴오피스 지원](https://www.hancom.com/cs_center/csDownload.do) — HWPX 스펙 문서

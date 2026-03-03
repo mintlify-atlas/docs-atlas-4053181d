@@ -1,0 +1,271 @@
+---
+title: "PDF 포맷"
+description: "PDF 파서 가이드 (선택적 의존성)"
+---
+
+## 개요
+
+PDF (Portable Document Format) 파서는 선택적 기능이에요. Adobe PDF 파일에서 텍스트를 추출하여 Markdown으로 변환할 수 있어요.
+
+<Warning>
+  PDF 지원은 별도 의존성 설치가 필요해요. 기본 설치에는 포함되지 않아요.
+</Warning>
+
+### 기술 스펙
+
+- **파일 구조**: Adobe PDF
+- **파서 엔진**: [PyMuPDF](https://pymupdf.readthedocs.io/) (fitz)
+- **지원 버전**: PDF 1.0 ~ 2.0
+- **추출 방식**: 텍스트 레이어 기반 추출
+
+## 설치
+
+PDF 지원을 사용하려면 `pdf` extra를 설치해야 해요:
+
+```bash
+uv add "ureca_document_parser[pdf]"
+```
+
+또는 pip 사용:
+
+```bash
+pip install "ureca_document_parser[pdf]"
+```
+
+### 의존성
+
+PDF 파서는 다음 라이브러리를 사용해요:
+
+- [PyMuPDF](https://pymupdf.readthedocs.io/) (`pymupdf>=1.24`) — PDF 파싱 및 텍스트 추출
+
+<Note>
+  PyMuPDF는 MuPDF 라이브러리의 Python 바인딩이에요. 빠르고 메모리 효율적인 PDF 처리를 제공해요.
+</Note>
+
+## 사용 예시
+
+### 기본 변환
+
+```python
+from ureca_document_parser import convert
+
+# PDF → Markdown 변환
+convert("논문.pdf", "논문.md")
+```
+
+### Document 모델 직접 다루기
+
+```python
+from ureca_document_parser.pdf import PdfParser
+
+# Document 객체 얻기
+doc = PdfParser.parse("보고서.pdf")
+
+# 메타데이터 확인
+print(f"제목: {doc.metadata.title}")
+print(f"저자: {doc.metadata.author}")
+print(f"페이지 수: {doc.metadata.extra['pages']}")
+
+# 텍스트 추출
+for element in doc.elements:
+    print(element.text)
+```
+
+### LangChain 통합
+
+```python
+from ureca_document_parser import convert
+
+# PDF를 RAG 파이프라인용 청크로 변환
+chunks = convert(
+    "연구자료.pdf",
+    chunks=True,
+    chunk_size=1000,
+    chunk_overlap=200
+)
+
+for chunk in chunks:
+    print(chunk.page_content)
+```
+
+### CLI 사용
+
+```bash
+# PDF 파일 변환
+uv run ureca_document_parser 계약서.pdf -o 계약서.md
+
+# 여러 PDF 일괄 변환
+for file in *.pdf; do
+    uv run ureca_document_parser "$file" -o "${file%.pdf}.md"
+done
+```
+
+## 지원 기능
+
+### 텍스트 추출
+
+PDF 파서는 문서의 텍스트 레이어에서 내용을 추출해요:
+
+- **페이지별 추출** — 각 페이지를 순회하며 텍스트 추출
+- **문단 분리** — 이중 줄바꿈(`\n\n`) 기준으로 문단 구분
+- **공백 정규화** — 연속된 공백 및 줄바꿈을 정리
+
+파싱 로직 (`src/ureca_document_parser/pdf/parser.py:66`):
+
+```python
+for page in doc:
+    text = page.get_text()
+    paragraphs = text.split("\n\n")  # 문단 분리
+    for para_text in paragraphs:
+        cleaned = " ".join(para_text.split())  # 공백 정규화
+        elements.append(Paragraph(text=cleaned))
+```
+
+### 메타데이터 추출
+
+PDF 파일의 메타데이터를 자동으로 추출해요:
+
+- **title** — 문서 제목 (없으면 파일명 사용)
+- **author** — 저자 정보
+- **extra**:
+  - `pages` — 총 페이지 수
+  - `producer` — PDF 생성 도구
+  - `creator` — 원본 문서 작성 도구
+
+```python
+# 메타데이터 예시
+metadata = Metadata(
+    title="연구 보고서",
+    author="홍길동",
+    source_format="pdf",
+    extra={
+        "pages": 42,
+        "producer": "Adobe PDF Library",
+        "creator": "Microsoft Word"
+    }
+)
+```
+
+## 제한사항
+
+<Warning>
+  PDF 파서는 다음 제약사항이 있어요:
+</Warning>
+
+### 텍스트 레이어 의존성
+
+PDF 파서는 **텍스트 레이어가 있는 PDF**만 지원해요:
+
+- ✅ **지원**: 워드프로세서에서 생성한 PDF (Word, Google Docs, LaTeX 등)
+- ✅ **지원**: 텍스트 레이어가 포함된 스캔 PDF (OCR 처리된 파일)
+- ❌ **미지원**: 이미지만 있는 스캔 PDF (텍스트 레이어 없음)
+- ❌ **미지원**: 암호화된 PDF
+
+<Tip>
+  이미지 기반 PDF는 OCR 파서를 사용하세요. OCR 기능은 `ureca_document_parser[ocr]`로 설치할 수 있어요.
+</Tip>
+
+### 레이아웃 및 서식
+
+- **표 구조** — 표는 플레인 텍스트로 추출돼요 (표 구조 보존 안 됨)
+- **이미지** — 이미지는 추출하지 않아요
+- **헤딩 레벨** — 제목 레벨은 감지하지 않아요 (모두 `heading_level=0`)
+- **다단 레이아웃** — 다단 구조는 읽기 순서가 보장되지 않을 수 있어요
+- **텍스트 서식** — 볼드, 이탤릭 등 서식은 무시돼요
+
+### 성능 고려사항
+
+- **대용량 PDF** — 수백 페이지 이상의 PDF는 처리 시간이 길 수 있어요
+- **복잡한 레이아웃** — 복잡한 레이아웃은 텍스트 추출 순서가 예상과 다를 수 있어요
+
+## 의존성 설치 확인
+
+PDF 지원이 설치되지 않은 상태에서 PDF 파일을 파싱하려고 하면 명확한 오류 메시지가 표시돼요:
+
+```python
+from ureca_document_parser.pdf import PdfParser
+
+doc = PdfParser.parse("file.pdf")
+# ParseError: PDF support requires pymupdf.
+# Install with: pip install ureca_document_parser[pdf]
+```
+
+런타임 체크 로직 (`src/ureca_document_parser/pdf/parser.py:38`):
+
+```python
+try:
+    import fitz  # pymupdf
+except ImportError:
+    raise ParseError(
+        "PDF support requires pymupdf. "
+        "Install with: pip install ureca_document_parser[pdf]"
+    ) from None
+```
+
+## 문제 해결
+
+### "PDF support requires pymupdf" 오류
+
+**원인**: PyMuPDF가 설치되지 않음
+
+**해결**:
+```bash
+uv add "ureca_document_parser[pdf]"
+```
+
+### 텍스트가 추출되지 않는 경우
+
+**원인**: 이미지 기반 PDF (텍스트 레이어 없음)
+
+**해결**:
+1. PDF를 Adobe Reader나 브라우저에서 열어 텍스트 선택이 가능한지 확인
+2. 텍스트 선택이 안 되는 경우 → 이미지 기반 PDF
+3. OCR 파서 사용:
+   ```bash
+   uv add "ureca_document_parser[ocr]"
+   ```
+
+### 텍스트 순서가 이상한 경우
+
+**원인**: 복잡한 다단 레이아웃 또는 비표준 PDF 구조
+
+**해결**:
+- PyMuPDF는 기하학적 위치 기반으로 텍스트 순서를 결정해요
+- 일부 복잡한 레이아웃에서는 예상과 다를 수 있어요
+- 가능하면 원본 문서 (Word, HWPX 등)를 사용하세요
+
+### 암호화된 PDF
+
+**원인**: 비밀번호로 보호된 PDF
+
+**해결**:
+- 현재 버전에서는 암호화된 PDF를 지원하지 않아요
+- PDF 보안 해제 후 사용하세요
+
+## OCR 파서와의 비교
+
+| 기능 | PDF 파서 | OCR 파서 |
+|------|----------|----------|
+| 텍스트 레이어 필요 | ✅ 필요 | ❌ 불필요 |
+| 이미지 PDF 지원 | ❌ | ✅ |
+| 처리 속도 | 빠름 | 느림 |
+| 정확도 | 높음 (100%) | 중간 (OCR 엔진 의존) |
+| 의존성 | PyMuPDF | Tesseract + Pillow |
+
+### 선택 가이드
+
+**PDF 파서 사용**:
+- ✅ 일반적인 디지털 PDF (Word, LaTeX, 웹 출력 등)
+- ✅ 빠른 처리 속도가 중요한 경우
+- ✅ 텍스트 정확도가 중요한 경우
+
+**OCR 파서 사용**:
+- ✅ 스캔한 문서 (텍스트 레이어 없음)
+- ✅ 손글씨 또는 인쇄물 이미지
+- ✅ 이미지 파일 (JPG, PNG 등)
+
+## 참고 자료
+
+- [PyMuPDF 문서](https://pymupdf.readthedocs.io/) — PDF 파싱 라이브러리
+- [PDF Reference](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf) — Adobe PDF 1.7 스펙
+- [소스 코드](https://github.com/ureca-corp/document_parser/tree/main/src/ureca_document_parser/pdf) — PDF 파서 구현
