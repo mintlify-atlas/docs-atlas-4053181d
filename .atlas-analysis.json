@@ -1,0 +1,100 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Ureca Document Parser",
+  "projectDescription": "Python library for parsing Korean word processor documents (HWP/HWPX) to Markdown with LangChain integration",
+  "theme": "palm",
+  "primaryColor": "#2563eb",
+  "lightColor": "#60a5fa",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/python-api",
+              "guides/cli",
+              "guides/langchain",
+              "guides/advanced"
+            ]
+          },
+          {
+            "group": "Formats",
+            "pages": [
+              "formats/hwp",
+              "formats/hwpx",
+              "formats/pdf"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "architecture",
+              "extending",
+              "migration",
+              "faq"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core API",
+            "pages": [
+              "api/convert",
+              "api/registry",
+              "api/models"
+            ]
+          },
+          {
+            "group": "Parsers",
+            "pages": [
+              "api/parsers/hwp",
+              "api/parsers/hwpx",
+              "api/parsers/pdf"
+            ]
+          },
+          {
+            "group": "Writers",
+            "pages": [
+              "api/writers/markdown"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "HWP and HWPX file parsing",
+    "Markdown conversion with table and list support",
+    "LangChain integration for RAG pipelines",
+    "Command-line interface",
+    "Extensible parser and writer architecture",
+    "PDF parsing with OCR support (optional)"
+  ],
+  "publicApiSurface": [
+    "convert()",
+    "ParseError",
+    "get_registry()",
+    "Document",
+    "Paragraph",
+    "Table",
+    "Image",
+    "ListItem",
+    "Parser protocol",
+    "Writer protocol",
+    "ureca_document_parser CLI command"
+  ]
+}
